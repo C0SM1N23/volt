@@ -60,7 +60,10 @@ check "printf() usage"                                    '\bprintf[[:space:]]*\
 check "new/delete used directly"                          '\b(new|delete)\b'
 check "banned libc functions (rand/srand/strcpy/strcat/sprintf/gets/atoi)" \
                                                             '\b(rand|srand|strcpy|strcat|sprintf|gets|atoi)[[:space:]]*\('
-check "commented-out code (// line containing ; or {)"     '^[[:space:]]*//.*[;{]'
+# Commented-out code is recognised by the line ending the way a statement or a
+# block does. Matching a ';' anywhere instead would flag ordinary prose, since
+# a semicolon is also punctuation.
+check "commented-out code (// line ending in ; { or })"    '^[[:space:]]*//.*[;{}][[:space:]]*$'
 
 # #define outside the macro allow-list (VOLT_TRY, VOLT_ASSERT, VOLT_LOG_*,
 # VOLT_TRACE, VOLT_CHECKPOINT, VOLT_LOOP_BOUND).
