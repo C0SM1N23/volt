@@ -178,9 +178,11 @@ jobs:
           cmake --build --preset coverage
           ctest --preset coverage
 
-      # lcov 2.x rejects the line ranges GCC emits for GoogleTest's generated
-      # methods; the counts themselves are correct, so the mismatch is demoted
-      # to a warning rather than losing coverage data for the whole file.
+      # Two lcov strictnesses are relaxed deliberately. 'mismatch' covers the
+      # line ranges GCC emits for GoogleTest's generated methods, where the
+      # counts are right but the ranges are not. 'unused' covers extract
+      # patterns for modules that hold no sources yet, which must not read as
+      # a coverage failure.
       - name: Collect coverage
         run: |
           lcov --capture --directory build/coverage \
@@ -190,10 +192,10 @@ jobs:
           lcov --extract coverage-all.info \
                "${PWD}/platform/*" "${PWD}/safety/*" "${PWD}/communication/*" \
                --output-file coverage-src.info \
-               --ignore-errors inconsistent,mismatch,empty
+               --ignore-errors inconsistent,mismatch,empty,unused
           lcov --remove coverage-src.info "*/tests/*" \
                --output-file coverage.info \
-               --ignore-errors inconsistent,mismatch,empty
+               --ignore-errors inconsistent,mismatch,empty,unused
 
       - name: Enforce gate
         run: |
@@ -205,7 +207,7 @@ jobs:
           fi
 
           summary="$(lcov --summary coverage.info \
-                     --ignore-errors inconsistent,empty 2>&1 || true)"
+                     --ignore-errors inconsistent,empty,unused 2>&1 || true)"
           echo "$summary"
           actual="$(sed -nE 's/.*lines[.]+: ([0-9.]+)%.*/\1/p' <<<"$summary" | head -1)"
           if [[ -z "$actual" ]]; then
