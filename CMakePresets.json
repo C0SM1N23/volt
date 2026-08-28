@@ -1,0 +1,134 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 28, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "environment": { "CC": "gcc-14", "CXX": "g++-14" },
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "dev",
+      "inherits": "base",
+      "displayName": "Development",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VOLT_BUILD_TESTS": "ON",
+        "VOLT_BUILD_TOOLS": "OFF",
+        "VOLT_ENABLE_TRACING": "ON",
+        "VOLT_SANITIZER": "none"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "displayName": "Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "VOLT_BUILD_TESTS": "ON",
+        "VOLT_BUILD_TOOLS": "OFF",
+        "VOLT_ENABLE_TRACING": "OFF",
+        "VOLT_SANITIZER": "none"
+      }
+    },
+    {
+      "name": "rt",
+      "inherits": "base",
+      "displayName": "Real-time target",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "VOLT_BUILD_TESTS": "ON",
+        "VOLT_BUILD_TOOLS": "OFF",
+        "VOLT_ENABLE_TRACING": "ON",
+        "VOLT_SANITIZER": "none"
+      }
+    },
+    {
+      "name": "asan",
+      "inherits": "base",
+      "displayName": "AddressSanitizer",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VOLT_BUILD_TESTS": "ON",
+        "VOLT_BUILD_TOOLS": "OFF",
+        "VOLT_ENABLE_TRACING": "OFF",
+        "VOLT_SANITIZER": "asan"
+      }
+    },
+    {
+      "name": "ubsan",
+      "inherits": "base",
+      "displayName": "UndefinedBehaviorSanitizer",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VOLT_BUILD_TESTS": "ON",
+        "VOLT_BUILD_TOOLS": "OFF",
+        "VOLT_ENABLE_TRACING": "OFF",
+        "VOLT_SANITIZER": "ubsan"
+      }
+    },
+    {
+      "name": "tsan",
+      "inherits": "base",
+      "displayName": "ThreadSanitizer",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VOLT_BUILD_TESTS": "ON",
+        "VOLT_BUILD_TOOLS": "OFF",
+        "VOLT_ENABLE_TRACING": "OFF",
+        "VOLT_SANITIZER": "tsan"
+      }
+    },
+    {
+      "name": "coverage",
+      "inherits": "base",
+      "displayName": "Coverage",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VOLT_BUILD_TESTS": "ON",
+        "VOLT_BUILD_TOOLS": "OFF",
+        "VOLT_ENABLE_TRACING": "OFF",
+        "VOLT_SANITIZER": "none",
+        "CMAKE_CXX_FLAGS": "--coverage",
+        "CMAKE_EXE_LINKER_FLAGS": "--coverage"
+      }
+    },
+    {
+      "name": "sim",
+      "inherits": "base",
+      "displayName": "Simulation",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VOLT_BUILD_TESTS": "ON",
+        "VOLT_BUILD_TOOLS": "ON",
+        "VOLT_ENABLE_TRACING": "ON",
+        "VOLT_SANITIZER": "none"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "rt", "configurePreset": "rt" },
+    { "name": "asan", "configurePreset": "asan" },
+    { "name": "ubsan", "configurePreset": "ubsan" },
+    { "name": "tsan", "configurePreset": "tsan" },
+    { "name": "coverage", "configurePreset": "coverage" },
+    { "name": "sim", "configurePreset": "sim" }
+  ],
+  "testPresets": [
+    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true } },
+    { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } },
+    { "name": "rt", "configurePreset": "rt", "output": { "outputOnFailure": true } },
+    { "name": "asan", "configurePreset": "asan", "output": { "outputOnFailure": true } },
+    { "name": "ubsan", "configurePreset": "ubsan", "output": { "outputOnFailure": true } },
+    { "name": "tsan", "configurePreset": "tsan", "output": { "outputOnFailure": true } },
+    { "name": "coverage", "configurePreset": "coverage", "output": { "outputOnFailure": true } },
+    { "name": "sim", "configurePreset": "sim", "output": { "outputOnFailure": true } }
+  ]
+}

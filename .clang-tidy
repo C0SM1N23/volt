@@ -1,0 +1,23 @@
+---
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  concurrency-*,
+  cppcoreguidelines-pro-type-cstyle-cast,
+  google-build-using-namespace,
+  modernize-use-nodiscard,
+  performance-*,
+  readability-*
+
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*'
+FormatStyle: file
+
+CheckOptions:
+  - key: readability-function-size.LineThreshold
+    value: '50'
+  - key: readability-function-size.ParameterThreshold
+    value: '5'
+  - key: readability-function-size.NestingThreshold
+    value: '3'
