@@ -9,7 +9,7 @@ indent_style = space
 indent_size = 4
 
 [*.{cpp,cc,cxx,h,hpp,hxx,tpp,ipp}]
-indent_size = 4
+indent_size = 2
 
 [*.{json,yaml,yml}]
 indent_size = 2
