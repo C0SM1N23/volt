@@ -25,8 +25,8 @@ Sursa de adevar pentru CUM se scrie este acest fisier.
     fragmente, NEVER "restul ramane la fel", NEVER diff-uri partiale fara context.
 1.8 MUST: raspunsul se incheie cu comenzile exacte de build si de test, si cu sectiunile
     "Observatii pentru viitor" si "Intrebari".
-1.9 MUST: maxim ~500 de linii de cod nou per sesiune. Daca prompt-ul cere mai mult, spui
-    asta si propui impartirea, inainte sa incepi.
+1.9 MUST: codul livrat e bine gandit si eficient. Structura minima care rezolva problema,
+    fara duplicare, fara cod speculativ, cu cost la rulare justificat pe calea critica.
 
 ---
 
