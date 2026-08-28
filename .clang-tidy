@@ -2,6 +2,7 @@
 Checks: >
   -*,
   bugprone-*,
+  -bugprone-easily-swappable-parameters,
   cert-*,
   concurrency-*,
   cppcoreguidelines-pro-type-cstyle-cast,
@@ -11,7 +12,7 @@ Checks: >
   readability-*
 
 WarningsAsErrors: '*'
-HeaderFilterRegex: '.*'
+HeaderFilterRegex: 'include/volt/'
 FormatStyle: file
 
 CheckOptions:

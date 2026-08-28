@@ -28,7 +28,7 @@ check() {
     if [[ "${#files[@]}" -eq 0 ]]; then
         return
     fi
-    matches="$(grep -nE "$pattern" -- "${files[@]}" 2>/dev/null || true)"
+    matches="$(grep -HnE "$pattern" -- "${files[@]}" 2>/dev/null || true)"
     if [[ -n "$matches" ]]; then
         echo "BANNED: $description"
         echo "$matches"
@@ -43,7 +43,7 @@ check_i() {
     if [[ "${#files[@]}" -eq 0 ]]; then
         return
     fi
-    matches="$(grep -inE "$pattern" -- "${files[@]}" 2>/dev/null || true)"
+    matches="$(grep -HinE "$pattern" -- "${files[@]}" 2>/dev/null || true)"
     if [[ -n "$matches" ]]; then
         echo "BANNED: $description"
         echo "$matches"

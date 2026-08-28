@@ -1,0 +1,224 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned so a runner image update cannot silently change the toolchain a
+  # result was produced with. SPEC 7.1 fixes the compiler versions.
+  LLVM_VERSION: 19
+  GCC_VERSION: 14
+
+jobs:
+  # Cheapest gate first: no toolchain, catches the largest class of deviations.
+  banned-patterns:
+    name: Banned patterns
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./ci/check_banned_patterns.sh
+
+  forbidden-symbols:
+    name: Forbidden symbols
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./ci/check_forbidden_symbols.sh
+
+  format:
+    name: clang-format
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh "${LLVM_VERSION}"
+          sudo apt-get install -y "clang-format-${LLVM_VERSION}"
+
+      - name: Check formatting
+        run: |
+          mapfile -d '' -t files < <(
+            find apps platform distributed communication diagnostics safety \
+                 security services simulation firmware tools tests -type f \
+              \( -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -o -name '*.cc' \
+                 -o -name '*.tpp' -o -name '*.ipp' \) -print0
+          )
+          if [[ "${#files[@]}" -eq 0 ]]; then
+            echo "No C++ sources to check."
+            exit 0
+          fi
+          "clang-format-${LLVM_VERSION}" --dry-run --Werror "${files[@]}"
+
+  tidy:
+    name: clang-tidy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh "${LLVM_VERSION}"
+          sudo apt-get install -y \
+            "clang-tidy-${LLVM_VERSION}" ninja-build libgtest-dev libgmock-dev
+
+      # clang-tidy reads the compile database, so it must be produced by the
+      # same compiler family or it trips over flags clang does not accept.
+      - name: Configure
+        run: cmake --preset dev -DCMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}"
+
+      - name: Run clang-tidy
+        run: "run-clang-tidy-${LLVM_VERSION} -p build/dev -quiet"
+
+  build:
+    name: build ${{ matrix.compiler }} ${{ matrix.build_type }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc-14, clang-19]
+        build_type: [Debug, RelWithDebInfo]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ccache libgtest-dev libgmock-dev
+          if [[ "${{ matrix.compiler }}" == clang-* ]]; then
+            wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+            chmod +x llvm.sh
+            sudo ./llvm.sh "${LLVM_VERSION}"
+          else
+            sudo apt-get install -y "gcc-${GCC_VERSION}" "g++-${GCC_VERSION}"
+          fi
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ matrix.compiler }}-${{ matrix.build_type }}-${{ github.sha }}
+          restore-keys: ccache-${{ matrix.compiler }}-${{ matrix.build_type }}-
+
+      - name: Configure
+        run: |
+          if [[ "${{ matrix.compiler }}" == clang-* ]]; then
+            cxx="clang++-${LLVM_VERSION}"
+          else
+            cxx="g++-${GCC_VERSION}"
+          fi
+          cmake --preset dev \
+            -DCMAKE_CXX_COMPILER="${cxx}" \
+            -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build --preset dev
+
+      - name: Test
+        run: ctest --preset dev
+
+  sanitizers:
+    name: ${{ matrix.preset }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [asan, ubsan, tsan]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build "gcc-${GCC_VERSION}" "g++-${GCC_VERSION}" \
+            libgtest-dev libgmock-dev
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      # halt_on_error stops the run at the first finding instead of letting a
+      # sanitized test report and then exit zero.
+      - name: Test
+        env:
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          TSAN_OPTIONS: halt_on_error=1
+        run: ctest --preset ${{ matrix.preset }}
+
+  coverage:
+    name: Coverage gate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build "gcc-${GCC_VERSION}" "g++-${GCC_VERSION}" \
+            libgtest-dev libgmock-dev lcov
+
+      - name: Build and test
+        run: |
+          cmake --preset coverage
+          cmake --build --preset coverage
+          ctest --preset coverage
+
+      # lcov 2.x rejects the line ranges GCC emits for GoogleTest's generated
+      # methods; the counts themselves are correct, so the mismatch is demoted
+      # to a warning rather than losing coverage data for the whole file.
+      - name: Collect coverage
+        run: |
+          lcov --capture --directory build/coverage \
+               --gcov-tool "gcov-${GCC_VERSION}" \
+               --output-file coverage-all.info \
+               --ignore-errors inconsistent,mismatch
+          lcov --extract coverage-all.info \
+               "${PWD}/platform/*" "${PWD}/safety/*" "${PWD}/communication/*" \
+               --output-file coverage-src.info \
+               --ignore-errors inconsistent,mismatch,empty
+          lcov --remove coverage-src.info "*/tests/*" \
+               --output-file coverage.info \
+               --ignore-errors inconsistent,mismatch,empty
+
+      - name: Enforce gate
+        run: |
+          gate="$(grep -vE '^[[:space:]]*#' ci/coverage_gate.txt \
+                  | grep -oE '[0-9]+([.][0-9]+)?' | head -1)"
+          if [[ -z "$gate" ]]; then
+            echo "ci/coverage_gate.txt does not contain a percentage" >&2
+            exit 1
+          fi
+
+          summary="$(lcov --summary coverage.info \
+                     --ignore-errors inconsistent,empty 2>&1 || true)"
+          echo "$summary"
+          actual="$(sed -nE 's/.*lines[.]+: ([0-9.]+)%.*/\1/p' <<<"$summary" | head -1)"
+          if [[ -z "$actual" ]]; then
+            actual=0
+          fi
+
+          echo "Line coverage ${actual}%, gate ${gate}%"
+          awk -v a="$actual" -v g="$gate" \
+            'BEGIN { if (a + 0 < g + 0) { exit 1 } }' \
+            || { echo "Coverage ${actual}% is below the ${gate}% gate" >&2; exit 1; }
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-info
+          path: coverage.info

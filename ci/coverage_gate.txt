@@ -1,0 +1,3 @@
+# Minimum line coverage percentage required on platform/, safety/ and
+# communication/. Raise this as modules land; SPEC 0.2 K15 sets the target at 85.
+0

@@ -1,0 +1,6 @@
+# Symbols banned from services/ and safety/, one extended-regex pattern per
+# line. Lines starting with '#' and blank lines are ignored.
+#
+# Enforced by ci/check_forbidden_symbols.sh. SPEC 7.3 names the intent: no
+# manual allocation and no std::string on the data plane. Patterns are added
+# together with the modules that make them meaningful.
