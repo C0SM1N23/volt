@@ -85,3 +85,47 @@ scurta.
 **Limitele deviatiei:** doar acest check. Membrii tot trebuie initializati; ce
 se accepta e ca initializarea sa fie scrisa chiar si acolo unde constructorul
 implicit ar fi facut acelasi lucru.
+
+---
+
+## DEV-005 — `bugprone-reserved-identifier` in `platform/log/src/format_entry.cpp`
+
+**Regula semnalata:** identificator rezervat implementarii (`__start_...`,
+`__stop_...`).
+
+**Unde:** declaratiile celor doua simboluri care delimiteaza sectiunea
+`volt_log_formats`.
+
+**De ce se deviaza:** numele nu sunt alese de noi. Linker-ul genereaza exact
+`__start_<sectiune>` si `__stop_<sectiune>` pentru orice sectiune al carei nume
+e identificator C valid; sunt singurul mod de a citi tabela de formate fara cod
+de inregistrare care sa ruleze la pornire. Orice alt nume nu s-ar lega.
+
+**De ce nu exista alternativa mai buna:** varianta fara sectiune ar cere ca
+fiecare format sa se inregistreze la initializare, ceea ce inseamna cod care
+ruleaza inainte de `main`, ordine de initializare nedefinita intre unitati de
+translatie, si un cost la pornire proportional cu numarul de mesaje din
+program.
+
+**Limitele deviatiei:** exclusiv aceste doua declaratii. Niciun alt identificator
+din proiect nu incepe cu doua underscore-uri.
+
+---
+
+## DEV-006 — `readability-function-size` si `readability-function-cognitive-complexity` in directoarele de teste
+
+**Regulile semnalate:** lungime si complexitate cognitiva peste prag.
+
+**Unde:** dezactivate prin `.clang-tidy` in directoarele de teste.
+
+**De ce se deviaza:** o aserttiune GoogleTest (`ASSERT_TRUE`, `EXPECT_EQ`) se
+expandeaza in `if`/`else` si intr-un bloc de streaming a mesajului. Ambele
+metrici numara acele ramuri, desi cititorul testului nu le vede: un test cu opt
+aserttiuni liniare depaseste pragul fara sa aiba nicio ramura scrisa de mana.
+Rezultatul e ca regula recompenseaza scoaterea aserttiunilor, adica exact
+opusul a ce trebuie sa faca un test.
+
+**Limitele deviatiei:** doar codul de test. In productie ambele raman active,
+si regula 3.11 din AGENTS.md (maxim ~50 de linii, maxim 3 niveluri) se aplica
+in continuare — mai multe functii din `platform/log` au fost impartite tocmai
+fiindca le depaseau.
