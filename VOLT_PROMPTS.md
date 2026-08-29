@@ -636,6 +636,8 @@ Plus un test care verifica explicit ca setarea prioritatii RT esueaza *elegant* 
 
 ## P09 — no_alloc_scope si urmarirea alocarilor
 
+- [x] Done
+
 **Citeste inainte:** SPEC §8.3 punctele 5-6, §0.2 (K10).
 **Se leaga de:** P08.
 
