@@ -62,6 +62,22 @@ protected:
     return std::move(*socket);
   }
 
+  /// Starts a listener on an ephemeral loopback port.
+  [[nodiscard]] std::unique_ptr<IStreamListener> listener() {
+    core::expected<std::unique_ptr<IStreamListener>> listening = platform().listen_stream(
+        Endpoint{.address = kLoopbackAddress, .port = 0}, kDefaultListenBacklog);
+    EXPECT_TRUE(listening.has_value());
+    return std::move(*listening);
+  }
+
+  /// Connects to a listener that this fixture started.
+  [[nodiscard]] std::unique_ptr<IStreamSocket> connect_to(IStreamListener &target) {
+    core::expected<std::unique_ptr<IStreamSocket>> client =
+        platform().connect_stream(*target.local_endpoint());
+    EXPECT_TRUE(client.has_value());
+    return std::move(*client);
+  }
+
 private:
   std::unique_ptr<IPlatform> platform_;
 };
@@ -468,6 +484,143 @@ TYPED_TEST_P(PalConformance, DatagramLongerThanTheBufferIsTruncated) {
   EXPECT_LE(received->bytes, buffer.size());
 }
 
+// ----------------------------------------------------------- stream ----
+
+TYPED_TEST_P(PalConformance, ConnectingWhereNobodyListensReportsAnError) {
+  const core::expected<std::unique_ptr<IStreamSocket>> client =
+      this->platform().connect_stream(Endpoint{.address = kLoopbackAddress, .port = 1});
+
+  ASSERT_FALSE(client.has_value());
+  EXPECT_EQ(core::category(client.error()), core::ErrorCategory::kTransient);
+}
+
+TYPED_TEST_P(PalConformance, ListenerReportsItsEphemeralPort) {
+  const std::unique_ptr<IStreamListener> listener = this->listener();
+
+  const core::expected<Endpoint> local = listener->local_endpoint();
+  ASSERT_TRUE(local.has_value());
+  EXPECT_NE(local->port, 0);
+}
+
+TYPED_TEST_P(PalConformance, AcceptTimesOutWhenNobodyConnects) {
+  const std::unique_ptr<IStreamListener> listener = this->listener();
+  ASSERT_TRUE(listener->set_accept_timeout(kShortInterval).has_value());
+
+  const core::expected<std::unique_ptr<IStreamSocket>> accepted = listener->accept();
+  ASSERT_FALSE(accepted.has_value());
+  EXPECT_EQ(core::category(accepted.error()), core::ErrorCategory::kTransient);
+}
+
+TYPED_TEST_P(PalConformance, AcceptTimeoutRejectsAZeroDuration) {
+  const std::unique_ptr<IStreamListener> listener = this->listener();
+
+  const core::expected<void> result = listener->set_accept_timeout(core::Duration{});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), core::ErrorCode::kConfigValueOutOfRange);
+}
+
+TYPED_TEST_P(PalConformance, ConnectionIsEstablishedBeforeItIsAccepted) {
+  // The whole reason a single thread can connect and then accept: the peer
+  // does not have to be waiting in accept() for the connection to complete.
+  const std::unique_ptr<IStreamListener> listener = this->listener();
+  const std::unique_ptr<IStreamSocket> client = this->connect_to(*listener);
+
+  const core::expected<std::unique_ptr<IStreamSocket>> server = listener->accept();
+  ASSERT_TRUE(server.has_value());
+  EXPECT_TRUE(client->peer_endpoint().has_value());
+}
+
+TYPED_TEST_P(PalConformance, StreamCarriesBytesFromClientToServer) {
+  const std::unique_ptr<IStreamListener> listener = this->listener();
+  const std::unique_ptr<IStreamSocket> client = this->connect_to(*listener);
+  core::expected<std::unique_ptr<IStreamSocket>> server = listener->accept();
+  ASSERT_TRUE(server.has_value());
+  ASSERT_TRUE((*server)->set_receive_timeout(kReceiveTimeout).has_value());
+
+  constexpr std::array<std::byte, 3> kPayload{std::byte{7}, std::byte{8}, std::byte{9}};
+  ASSERT_TRUE(client->send(kPayload).has_value());
+
+  std::array<std::byte, 8> buffer{};
+  const core::expected<std::size_t> received = (*server)->receive(buffer);
+  ASSERT_TRUE(received.has_value());
+  EXPECT_EQ(*received, kPayload.size());
+  EXPECT_EQ(buffer[0], kPayload[0]);
+  EXPECT_EQ(buffer[2], kPayload[2]);
+}
+
+TYPED_TEST_P(PalConformance, StreamCarriesBytesFromServerToClient) {
+  const std::unique_ptr<IStreamListener> listener = this->listener();
+  const std::unique_ptr<IStreamSocket> client = this->connect_to(*listener);
+  core::expected<std::unique_ptr<IStreamSocket>> server = listener->accept();
+  ASSERT_TRUE(server.has_value());
+  ASSERT_TRUE(client->set_receive_timeout(kReceiveTimeout).has_value());
+
+  constexpr std::array<std::byte, 2> kPayload{std::byte{1}, std::byte{2}};
+  ASSERT_TRUE((*server)->send(kPayload).has_value());
+
+  std::array<std::byte, 8> buffer{};
+  const core::expected<std::size_t> received = client->receive(buffer);
+  ASSERT_TRUE(received.has_value());
+  EXPECT_EQ(*received, kPayload.size());
+}
+
+TYPED_TEST_P(PalConformance, HalfClosingIsReportedAsEndOfStream) {
+  const std::unique_ptr<IStreamListener> listener = this->listener();
+  const std::unique_ptr<IStreamSocket> client = this->connect_to(*listener);
+  core::expected<std::unique_ptr<IStreamSocket>> server = listener->accept();
+  ASSERT_TRUE(server.has_value());
+  ASSERT_TRUE((*server)->set_receive_timeout(kReceiveTimeout).has_value());
+
+  ASSERT_TRUE(client->shutdown_send().has_value());
+
+  std::array<std::byte, 4> buffer{};
+  const core::expected<std::size_t> received = (*server)->receive(buffer);
+  ASSERT_TRUE(received.has_value());
+  EXPECT_EQ(*received, 0U);
+}
+
+TYPED_TEST_P(PalConformance, HalfClosingLeavesTheOtherDirectionOpen) {
+  // A caller that has finished asking must still be able to read the answer.
+  const std::unique_ptr<IStreamListener> listener = this->listener();
+  const std::unique_ptr<IStreamSocket> client = this->connect_to(*listener);
+  core::expected<std::unique_ptr<IStreamSocket>> server = listener->accept();
+  ASSERT_TRUE(server.has_value());
+  ASSERT_TRUE(client->set_receive_timeout(kReceiveTimeout).has_value());
+
+  ASSERT_TRUE(client->shutdown_send().has_value());
+
+  constexpr std::array<std::byte, 1> kAnswer{std::byte{42}};
+  ASSERT_TRUE((*server)->send(kAnswer).has_value());
+
+  std::array<std::byte, 4> buffer{};
+  const core::expected<std::size_t> received = client->receive(buffer);
+  ASSERT_TRUE(received.has_value());
+  EXPECT_EQ(*received, kAnswer.size());
+  EXPECT_EQ(buffer[0], kAnswer[0]);
+}
+
+TYPED_TEST_P(PalConformance, StreamReceiveTimesOutWhenNothingArrives) {
+  const std::unique_ptr<IStreamListener> listener = this->listener();
+  const std::unique_ptr<IStreamSocket> client = this->connect_to(*listener);
+  core::expected<std::unique_ptr<IStreamSocket>> server = listener->accept();
+  ASSERT_TRUE(server.has_value());
+  ASSERT_TRUE((*server)->set_receive_timeout(kShortInterval).has_value());
+
+  std::array<std::byte, 4> buffer{};
+  const core::expected<std::size_t> received = (*server)->receive(buffer);
+  ASSERT_FALSE(received.has_value());
+  EXPECT_EQ(core::category(received.error()), core::ErrorCategory::kTransient);
+}
+
+TYPED_TEST_P(PalConformance, StreamReceiveTimeoutRejectsAZeroDuration) {
+  const std::unique_ptr<IStreamListener> listener = this->listener();
+  const std::unique_ptr<IStreamSocket> client = this->connect_to(*listener);
+
+  const core::expected<void> result = client->set_receive_timeout(core::Duration{});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), core::ErrorCode::kConfigValueOutOfRange);
+}
+
 // ----------------------------------------------------------------- file ----
 
 TYPED_TEST_P(PalConformance, FileRoundTripsWhatWasWritten) {
@@ -747,8 +900,13 @@ REGISTER_TYPED_TEST_SUITE_P(
     SpawningAMissingProgramReportsAnError, ProcessReportsASuccessfulExit,
     ProcessReportsAFailingExit, ProcessIsNoLongerRunningAfterBeingWaitedFor,
     WaitingTwiceForAProcessReportsAnError, ProcessHasAnIdentifier,
-    SignallingAnExitedProcessReportsAnError, OpeningAMissingWatchdogReportsAnError,
-    WatchdogRejectsAZeroTimeout, WatchdogAcceptsBeingPetted,
+    SignallingAnExitedProcessReportsAnError, ConnectingWhereNobodyListensReportsAnError,
+    ListenerReportsItsEphemeralPort, AcceptTimesOutWhenNobodyConnects,
+    AcceptTimeoutRejectsAZeroDuration, ConnectionIsEstablishedBeforeItIsAccepted,
+    StreamCarriesBytesFromClientToServer, StreamCarriesBytesFromServerToClient,
+    HalfClosingIsReportedAsEndOfStream, HalfClosingLeavesTheOtherDirectionOpen,
+    StreamReceiveTimesOutWhenNothingArrives, StreamReceiveTimeoutRejectsAZeroDuration,
+    OpeningAMissingWatchdogReportsAnError, WatchdogRejectsAZeroTimeout, WatchdogAcceptsBeingPetted,
     LockingMemoryEitherSucceedsOrReportsWhyNot, PromotingTheCurrentThreadRejectsABadPriority,
     PromotingTheCurrentThreadRejectsAPriorityOnTheDefaultPolicy);
 

@@ -5,6 +5,8 @@
 #include "volt/pal/process.hpp"
 #include "volt/pal/shared_memory.hpp"
 #include "volt/pal/socket.hpp"
+#include "volt/pal/stream_listener.hpp"
+#include "volt/pal/stream_socket.hpp"
 #include "volt/pal/thread.hpp"
 #include "volt/pal/timer.hpp"
 #include "volt/pal/watchdog_device.hpp"
@@ -76,6 +78,23 @@ public:
   /// @errors kResourceExhausted when no descriptor is available
   [[nodiscard]] virtual core::expected<std::unique_ptr<ISocket>>
   create_datagram_socket() noexcept = 0;
+
+  /// Starts listening for stream connections on `local`.
+  ///
+  /// A zero port asks for an ephemeral one, which the listener then reports.
+  ///
+  /// @errors kResourceBusy when the endpoint is taken,
+  ///         kResourceExhausted when no descriptor is available
+  [[nodiscard]] virtual core::expected<std::unique_ptr<IStreamListener>>
+  listen_stream(Endpoint local, unsigned backlog) noexcept = 0;
+
+  /// Opens a stream connection to `remote`.
+  ///
+  /// @post   on success the connection is established and may be written to
+  /// @errors kTransientPeerUnreachable when nothing is listening there,
+  ///         kResourceExhausted when no descriptor is available
+  [[nodiscard]] virtual core::expected<std::unique_ptr<IStreamSocket>>
+  connect_stream(Endpoint remote) noexcept = 0;
 
   /// Opens a file.
   ///

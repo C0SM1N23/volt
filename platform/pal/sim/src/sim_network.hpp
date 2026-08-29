@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <optional>
 #include <vector>
@@ -22,6 +23,23 @@ struct SimDatagram {
   std::uint64_t sequence = 0;
   Endpoint from;
   std::vector<std::byte> payload;
+};
+
+/// Which end of a stream connection an object holds.
+enum class StreamSide : std::uint8_t { kClient, kServer };
+
+/// A connected byte stream, as two queues facing opposite ways.
+///
+/// A stream keeps no message boundaries, so the queues are plain byte vectors:
+/// what one side appends in three calls the other may read in one, exactly as
+/// a real stream behaves.
+struct StreamConnection {
+  Endpoint client;
+  Endpoint server;
+  std::vector<std::byte> to_client;
+  std::vector<std::byte> to_server;
+  bool client_stopped_sending = false;
+  bool server_stopped_sending = false;
 };
 
 /// The whole network, as queues in memory.
@@ -67,13 +85,45 @@ public:
   /// Removes and returns the earliest datagram already visible at `now_ns`.
   [[nodiscard]] std::optional<SimDatagram> take_due(SocketId socket, std::int64_t now_ns);
 
+  using ConnectionId = std::uint64_t;
+
+  /// Starts listening on `local`, assigning a port when it asks for zero.
+  ///
+  /// @errors kResourceBusy when something already listens there
+  [[nodiscard]] core::expected<SocketId> listen(Endpoint local, unsigned backlog);
+
+  /// Returns where a listener is bound.
+  [[nodiscard]] core::expected<Endpoint> listener_endpoint(SocketId listener) const;
+
+  /// Establishes a connection to whoever listens at `remote`.
+  ///
+  /// The connection is complete when this returns, before anyone accepts it,
+  /// which is what lets one thread connect and then accept.
+  ///
+  /// @errors kTransientPeerUnreachable when nothing listens there,
+  ///         kResourceExhausted when the listener's backlog is full
+  [[nodiscard]] core::expected<ConnectionId> connect(Endpoint remote);
+
+  /// Takes the next connection waiting on `listener`.
+  [[nodiscard]] std::optional<ConnectionId> take_pending(SocketId listener);
+
+  /// Returns a connection, or nothing when the identifier is unknown.
+  [[nodiscard]] StreamConnection *connection(ConnectionId identifier);
+
 private:
   struct Socket {
     std::optional<Endpoint> local;
     std::vector<SimDatagram> inbox;
   };
 
+  struct Listener {
+    Endpoint local;
+    unsigned backlog = 0;
+    std::deque<ConnectionId> pending;
+  };
+
   [[nodiscard]] Socket *find_by_endpoint(Endpoint endpoint);
+  [[nodiscard]] Listener *find_listener(Endpoint endpoint);
   [[nodiscard]] std::uint16_t next_free_port();
 
   // First port of the IANA dynamic range, so a simulated ephemeral port looks
@@ -83,7 +133,10 @@ private:
   SimRandom *random_;
   NetworkModel model_;
   std::map<SocketId, Socket> sockets_;
+  std::map<SocketId, Listener> listeners_;
+  std::map<ConnectionId, StreamConnection> connections_;
   SocketId next_socket_ = 1;
+  ConnectionId next_connection_ = 1;
   std::uint64_t next_sequence_ = 1;
   std::uint16_t next_port_ = kFirstEphemeralPort;
 };

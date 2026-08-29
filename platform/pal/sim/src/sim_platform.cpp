@@ -5,6 +5,8 @@
 #include "sim_process.hpp"
 #include "sim_shared_memory.hpp"
 #include "sim_socket.hpp"
+#include "sim_stream_listener.hpp"
+#include "sim_stream_socket.hpp"
 #include "sim_thread.hpp"
 #include "sim_timer.hpp"
 #include "sim_watchdog_device.hpp"
@@ -87,6 +89,28 @@ SimPlatform::open_shared_memory(std::string_view name) noexcept {
 
 core::expected<std::unique_ptr<ISocket>> SimPlatform::create_datagram_socket() noexcept {
   return std::make_unique<SimSocket>(*world_, world_->network().open());
+}
+
+core::expected<std::unique_ptr<IStreamListener>>
+SimPlatform::listen_stream(Endpoint local, unsigned backlog) noexcept {
+  const core::expected<detail::SimNetwork::SocketId> listener =
+      world_->network().listen(local, backlog);
+  if (!listener.has_value()) {
+    return std::unexpected{listener.error()};
+  }
+  world_->record("listener.open", *listener);
+  return std::make_unique<SimStreamListener>(*world_, *listener);
+}
+
+core::expected<std::unique_ptr<IStreamSocket>>
+SimPlatform::connect_stream(Endpoint remote) noexcept {
+  const core::expected<detail::SimNetwork::ConnectionId> connection =
+      world_->network().connect(remote);
+  if (!connection.has_value()) {
+    return std::unexpected{connection.error()};
+  }
+  world_->record("stream.connect", *connection);
+  return std::make_unique<SimStreamSocket>(*world_, *connection, detail::StreamSide::kClient);
 }
 
 core::expected<std::unique_ptr<IFile>> SimPlatform::open_file(std::string_view path,

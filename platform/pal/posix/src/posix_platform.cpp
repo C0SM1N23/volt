@@ -5,9 +5,12 @@
 #include "posix_process.hpp"
 #include "posix_shared_memory.hpp"
 #include "posix_socket.hpp"
+#include "posix_stream_listener.hpp"
+#include "posix_stream_socket.hpp"
 #include "posix_thread.hpp"
 #include "posix_timer.hpp"
 #include "posix_watchdog_device.hpp"
+#include "sockaddr_conversion.hpp"
 
 #include "volt/core/endian.hpp"
 
@@ -290,6 +293,47 @@ core::expected<std::unique_ptr<ISocket>> PosixPlatform::create_datagram_socket()
     return std::unexpected{detail::from_errno(errno)};
   }
   return std::make_unique<PosixSocket>(std::move(descriptor));
+}
+
+core::expected<std::unique_ptr<IStreamListener>>
+PosixPlatform::listen_stream(Endpoint local, unsigned backlog) noexcept {
+  detail::FileDescriptor descriptor{::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0)};
+  if (!descriptor.valid()) {
+    return std::unexpected{detail::from_errno(errno)};
+  }
+
+  // Without SO_REUSEADDR a listener that just closed leaves its port in
+  // TIME_WAIT, and a service restarting inside that window cannot bind again.
+  const int reuse = 1;
+  if (::setsockopt(descriptor.get(), SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) != 0) {
+    return std::unexpected{detail::from_errno(errno)};
+  }
+
+  const ::sockaddr_in address = detail::to_sockaddr(local);
+  if (::bind(descriptor.get(), detail::as_generic(address), sizeof(address)) != 0) {
+    return std::unexpected{detail::from_errno(errno)};
+  }
+  if (::listen(descriptor.get(), static_cast<int>(backlog)) != 0) {
+    return std::unexpected{detail::from_errno(errno)};
+  }
+  return std::make_unique<PosixStreamListener>(std::move(descriptor));
+}
+
+core::expected<std::unique_ptr<IStreamSocket>>
+PosixPlatform::connect_stream(Endpoint remote) noexcept {
+  detail::FileDescriptor descriptor{::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0)};
+  if (!descriptor.valid()) {
+    return std::unexpected{detail::from_errno(errno)};
+  }
+
+  const ::sockaddr_in address = detail::to_sockaddr(remote);
+  while (::connect(descriptor.get(), detail::as_generic(address), sizeof(address)) != 0) {
+    if (errno == EINTR) {
+      continue;
+    }
+    return std::unexpected{detail::from_errno(errno)};
+  }
+  return std::make_unique<PosixStreamSocket>(std::move(descriptor));
 }
 
 core::expected<std::unique_ptr<IFile>> PosixPlatform::open_file(std::string_view path,

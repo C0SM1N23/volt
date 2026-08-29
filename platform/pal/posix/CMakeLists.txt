@@ -8,10 +8,13 @@ volt_add_library(pal_posix
         src/posix_process.cpp
         src/posix_shared_memory.cpp
         src/posix_socket.cpp
+        src/posix_stream_listener.cpp
+        src/posix_stream_socket.cpp
         src/posix_thread.cpp
         src/posix_timer.cpp
         src/posix_watchdog_device.cpp
         src/priority_inheriting_mutex.cpp
+        src/sockaddr_conversion.cpp
     PUBLIC_LINK volt::pal
 )
 

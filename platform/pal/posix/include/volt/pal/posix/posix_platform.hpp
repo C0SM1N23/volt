@@ -30,6 +30,12 @@ public:
 
   [[nodiscard]] core::expected<std::unique_ptr<ISocket>> create_datagram_socket() noexcept override;
 
+  [[nodiscard]] core::expected<std::unique_ptr<IStreamListener>>
+  listen_stream(Endpoint local, unsigned backlog) noexcept override;
+
+  [[nodiscard]] core::expected<std::unique_ptr<IStreamSocket>>
+  connect_stream(Endpoint remote) noexcept override;
+
   [[nodiscard]] core::expected<std::unique_ptr<IFile>> open_file(std::string_view path,
                                                                  FileMode mode) noexcept override;
 

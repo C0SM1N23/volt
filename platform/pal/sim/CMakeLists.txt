@@ -7,6 +7,8 @@ volt_add_library(pal_sim
         src/sim_process.cpp
         src/sim_scheduler.cpp
         src/sim_socket.cpp
+        src/sim_stream_listener.cpp
+        src/sim_stream_socket.cpp
         src/sim_thread.cpp
         src/sim_timer.cpp
         src/sim_watchdog_device.cpp
