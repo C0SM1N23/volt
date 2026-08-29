@@ -13,6 +13,7 @@ function(volt_add_test name)
     target_compile_features(${name} PRIVATE cxx_std_23)
     volt_set_warnings(${name})
     volt_set_sanitizers(${name})
+    volt_set_coverage(${name})
     target_link_libraries(${name} PRIVATE GTest::gtest GTest::gtest_main ${ARG_LINK})
 
     include(GoogleTest)

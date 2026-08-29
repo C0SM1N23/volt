@@ -1,13 +1,20 @@
 {
   "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 28, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "base",
       "hidden": true,
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
-      "environment": { "CC": "gcc-14", "CXX": "g++-14" },
+      "environment": {
+        "CC": "gcc-14",
+        "CXX": "g++-14"
+      },
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
@@ -94,8 +101,7 @@
         "VOLT_BUILD_TOOLS": "OFF",
         "VOLT_ENABLE_TRACING": "OFF",
         "VOLT_SANITIZER": "none",
-        "CMAKE_CXX_FLAGS": "--coverage",
-        "CMAKE_EXE_LINKER_FLAGS": "--coverage"
+        "VOLT_ENABLE_COVERAGE": "ON"
       }
     },
     {
@@ -112,23 +118,95 @@
     }
   ],
   "buildPresets": [
-    { "name": "dev", "configurePreset": "dev" },
-    { "name": "release", "configurePreset": "release" },
-    { "name": "rt", "configurePreset": "rt" },
-    { "name": "asan", "configurePreset": "asan" },
-    { "name": "ubsan", "configurePreset": "ubsan" },
-    { "name": "tsan", "configurePreset": "tsan" },
-    { "name": "coverage", "configurePreset": "coverage" },
-    { "name": "sim", "configurePreset": "sim" }
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "rt",
+      "configurePreset": "rt"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan"
+    },
+    {
+      "name": "ubsan",
+      "configurePreset": "ubsan"
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan"
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "coverage"
+    },
+    {
+      "name": "sim",
+      "configurePreset": "sim"
+    }
   ],
   "testPresets": [
-    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true } },
-    { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } },
-    { "name": "rt", "configurePreset": "rt", "output": { "outputOnFailure": true } },
-    { "name": "asan", "configurePreset": "asan", "output": { "outputOnFailure": true } },
-    { "name": "ubsan", "configurePreset": "ubsan", "output": { "outputOnFailure": true } },
-    { "name": "tsan", "configurePreset": "tsan", "output": { "outputOnFailure": true } },
-    { "name": "coverage", "configurePreset": "coverage", "output": { "outputOnFailure": true } },
-    { "name": "sim", "configurePreset": "sim", "output": { "outputOnFailure": true } }
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "rt",
+      "configurePreset": "rt",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ubsan",
+      "configurePreset": "ubsan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "coverage",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "sim",
+      "configurePreset": "sim",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
   ]
 }

@@ -19,6 +19,6 @@ function(volt_set_sanitizers target)
     # Lets a test tell that it is running under instrumentation. A timing
     # measurement taken under a sanitizer says nothing about the code, so the
     # benchmarks report that they were skipped rather than assert on a number
-    # the tooling invented.
-    target_compile_definitions(${target} PRIVATE VOLT_SANITIZER_ACTIVE=1)
+    # the tooling invented. Coverage sets the same definition.
+    target_compile_definitions(${target} PRIVATE VOLT_INSTRUMENTED=1)
 endfunction()

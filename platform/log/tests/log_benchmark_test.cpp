@@ -12,11 +12,12 @@
 namespace volt::log {
 namespace {
 
-// Set by the build when any sanitizer is on; see cmake/Sanitizers.cmake.
-#if defined(VOLT_SANITIZER_ACTIVE)
-constexpr bool kUnderSanitizer = true;
+// Set by the build when a sanitizer or coverage is on; see
+// cmake/Sanitizers.cmake and cmake/Coverage.cmake.
+#if defined(VOLT_INSTRUMENTED)
+constexpr bool kInstrumented = true;
 #else
-constexpr bool kUnderSanitizer = false;
+constexpr bool kInstrumented = false;
 #endif
 
 // Calls per timed batch. One clock read costs tens of nanoseconds on its own,
@@ -53,12 +54,13 @@ public:
 }
 
 TEST(LogBenchmarkTest, CallerPathStaysWithinItsBudget) {
-  if (kUnderSanitizer) {
-    // A sanitizer instruments every memory access, so a nanosecond figure
-    // taken under one measures the tooling rather than the code. The skip is
-    // decided at run time so the body still compiles under every
-    // configuration; only the assertion on time is meaningless there.
-    GTEST_SKIP() << "timing is not measurable under a sanitizer";
+  if (kInstrumented) {
+    // A sanitizer counts every memory access and coverage counts every line,
+    // so a nanosecond figure taken under either measures the tooling rather
+    // than the code. The skip is decided at run time so the body still
+    // compiles under every configuration; only the timing assertion is
+    // meaningless there.
+    GTEST_SKIP() << "timing is not measurable under instrumentation";
   }
 
   pal::posix::PosixPlatform platform;
