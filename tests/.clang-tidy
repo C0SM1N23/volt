@@ -1,15 +1,19 @@
-# Inherits the project configuration and relaxes two checks for tests only.
-# Both relaxations are recorded in docs/DEVIATIONS.md.
+# Inherits the project configuration and relaxes four checks for tests only.
+# All four are recorded in docs/DEVIATIONS.md.
 #
 # readability-magic-numbers (DEV-002): a test states its expected value as a
-# literal on purpose. Naming every constant in an expectation table hides what
-# the table is showing.
+# literal on purpose.
 #
-# cert-msc32-c / cert-msc51-cpp (DEV-003): AGENTS.md 8.5 requires every random
-# source in a test to take an explicit seed, so a failure can be replayed. The
-# check exists for unpredictability, which is the opposite of what a test needs.
+# cert-msc32-c / cert-msc51-cpp (DEV-003): AGENTS.md 8.5 requires an explicit
+# seed so a failure replays.
+#
+# readability-function-size and readability-function-cognitive-complexity
+# (DEV-006): a GoogleTest assertion expands into branches the reader never
+# sees, so both metrics count control flow that is not in the source.
 InheritParentConfig: true
 Checks: >
   -readability-magic-numbers,
   -cert-msc32-c,
-  -cert-msc51-cpp
+  -cert-msc51-cpp,
+  -readability-function-size,
+  -readability-function-cognitive-complexity
