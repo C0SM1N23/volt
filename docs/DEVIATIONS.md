@@ -1,7 +1,9 @@
 # Deviatii de la regulile de analiza statica
 
 Fiecare `// NOLINT(regula) — deviation: DEV-NNN` din cod are aici o intrare cu
-justificarea. Fara intrare, deviatia nu e acceptata la recenzie.
+justificarea. Tot aici intra si exceptiile de la regulile din AGENTS.md
+sectiunea 2 pe care le impune `ci/check_banned_patterns.sh`, cu acelasi
+format. Fara intrare, deviatia nu e acceptata la recenzie.
 
 ---
 
@@ -151,3 +153,56 @@ umplutura alaturi ar ocupa aceiasi doi octeti si ar ascunde motivul.
 
 **Limitele deviatiei:** exclusiv acest enum. Orice alt enum care nu ajunge pe
 disc isi ia latimea minima.
+
+---
+
+## DEV-008 — `operator new`, `operator delete` si `malloc`/`free` in `platform/memory/src/allocation_hooks.cpp`
+
+**Regula semnalata:** AGENTS.md 2.4, verificata de `ci/check_banned_patterns.sh`
+(`operator new used directly`, `operator delete used directly`,
+`malloc/free used directly`).
+
+**Unde:** exclusiv `platform/memory/src/allocation_hooks.cpp`, exceptat pe nume
+in checker. Restul arborelui ramane sub interdictie.
+
+**De ce se deviaza:** regula spune ca alocarea trece prin `platform/memory`.
+Fisierul acesta **este** locul unde trece: inlocuieste operatorii globali de
+alocare ai programului, iar ei trebuie sa ceara memoria de undeva. Cineva
+trebuie sa fie heap-ul, si asta e singurul loc din proiect care are voie.
+
+**De ce nu exista alternativa mai buna:** fara inlocuirea operatorilor,
+`no_alloc_scope` si `AllocationTracker` nu au de unde sti ca s-a alocat, iar
+K10 (SPEC 0.2) ramane o intentie in loc sa fie o masuratoare. Un alocator
+paralel, folosit doar de codul VOLT, ar rata exact alocarile care conteaza:
+cele facute de biblioteci sub un `no_alloc_scope`.
+
+**Limitele deviatiei:** un singur fisier, numit explicit in checker, care
+esueaza daca fisierul dispare. Codul din el nu construieste obiecte cu `new` —
+defineste operatorii si apeleaza `std::malloc` / `std::free` o singura data
+fiecare.
+
+---
+
+## DEV-009 — scriere pe `stderr` in `platform/memory/src/no_alloc_scope.cpp`
+
+**Regula semnalata:** AGENTS.md 2.5 — iesirea se face prin `platform/log`, sau
+prin `fmt` in tooling.
+
+**Unde:** `write_to_standard_error`, apelata doar din calea de abort a
+build-ului de debug, cand o alocare interzisa a fost detectata.
+
+**De ce se deviaza:** functia e urmata de `abort()`. Log-ul VOLT e un ring
+binar golit de alt thread, deci un mesaj scris acolo moare odata cu procesul,
+neajuns niciodata pe disc. O violare care omoara procesul trebuie sa spuna unde
+s-a intamplat cat timp procesul mai e in viata ca sa o spuna — altfel P09 cere
+"abort cu backtrace" si livreaza doar abort.
+
+**De ce nu exista alternativa mai buna:** un backtrace pastrat intr-un buffer
+static ar fi vizibil doar sub debugger sau intr-un core dump; testul de moarte
+din `allocation_test.cpp` verifica exact textul de pe stderr, deci mecanismul
+e si testat, nu doar presupus.
+
+**Limitele deviatiei:** doar build-ul de debug (`NDEBUG` nedefinit), doar calea
+de violare, doar aceasta functie. In release aceeasi violare se contorizeaza si
+se emite `TRACE(AllocationViolation)`, fara nicio scriere. Nimic altceva din
+`platform/` nu scrie pe un stream.

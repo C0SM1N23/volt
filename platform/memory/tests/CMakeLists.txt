@@ -23,6 +23,20 @@ volt_add_test(memory_queue_model_tests
     LINK volt::memory
 )
 
+volt_add_test(memory_allocation_tests
+    SOURCES allocation_test.cpp
+    LINK volt::memory volt::pal_posix
+)
+
+# Its own target because it runs for a full minute by design: a soak does not
+# belong in the same binary as suites that finish in milliseconds, and it needs
+# more than the default per-test limit.
+volt_add_test(memory_no_alloc_soak_tests
+    SOURCES no_alloc_soak_test.cpp
+    LINK volt::memory volt::pal_posix
+    TIMEOUT 120
+)
+
 volt_add_test(memory_queue_concurrency_tests
     SOURCES queue_concurrency_test.cpp
     LINK volt::memory volt::pal_posix

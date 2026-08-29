@@ -209,3 +209,45 @@ lucratori.
 | MPSC, 4 producatori | 10.000.000 | **0** | **0** |
 | SeqLock, 3 cititori | 1.000.000 publicari | **0 valori mixte** | **0** |
 | AtomicFixedPool, 4 lucratori | 1.000.000 transferuri | **0 sloturi duble** | **0** |
+
+---
+
+## K10 — Alocari dinamice pe calea de siguranta
+
+**Tinta:** SPEC 0.2 cere exact 0 alocari dinamice pe calea de siguranta in
+regim stationar, masurate cu hook pe alocator si `no_alloc_scope`.
+
+**Ce se masoara:** o bucla de control care ruleaza 60 s intr-un
+`volt::no_alloc_scope`. Fiecare ciclu ia opt esantioane dintr-o coada SPSC, le
+reduce, imprumuta si elibereaza un slot dintr-un `FixedPool`, taie o zona de
+lucru dintr-un `Arena` cu `FrameScope`, si publica rezultatul intr-un
+`SeqLock` — adica formele pe care le foloseste chiar calea de date.
+
+**Cum:** `platform/memory/tests/no_alloc_soak_test.cpp`, prin ceasul PAL.
+Contoarele vin din `AllocationTracker`, alimentat de operatorii de alocare
+inlocuiti din `platform/memory/src/allocation_hooks.cpp`.
+
+```sh
+cmake --preset dev
+ctest --preset dev -R memory_no_alloc_soak
+```
+
+| Masuratoare | Debug | Release |
+|---|---:|---:|
+| Durata buclei | 60,0 s | 60,0 s |
+| Alocari in `no_alloc_scope` | **0** | **0** |
+| Violari raportate de garda | **0** | **0** |
+| Reactia la o violare | abort cu backtrace | contor + `TRACE(AllocationViolation)` |
+
+**Observatii oneste:**
+
+- Sub AddressSanitizer si ThreadSanitizer, runtime-ul sanitizer-ului defineste
+  el operatorii de alocare, iar contoarele VOLT raman la zero fiindca nu vad
+  nimic. Acolo testele **se sar explicit**, nu trec: un zero nemasurat arata
+  identic cu un zero real, si numai unul dintre ele inseamna ceva.
+  `AllocationTracker::hooks_installed()` spune care dintre cele doua e cazul.
+- 60 s este durata ceruta de P09. SPEC 8.3 cere un soak de 1 h cu
+  `--check-no-alloc` la nivel de aplicatie; acela vine cand exista aplicatia,
+  si va folosi acelasi contor.
+- Cifra e masurata pe masina de dezvoltare, nu pe tinta PREEMPT_RT din SPEC 25.
+  Numarul de alocari nu depinde insa de masina: e o proprietate a codului.

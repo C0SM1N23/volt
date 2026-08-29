@@ -21,4 +21,12 @@ function(volt_set_sanitizers target)
     # benchmarks report that they were skipped rather than assert on a number
     # the tooling invented. Coverage sets the same definition.
     target_compile_definitions(${target} PRIVATE VOLT_INSTRUMENTED=1)
+
+    # AddressSanitizer and ThreadSanitizer define the allocation operators in
+    # their own runtime, and the linker takes those instead of the ones in
+    # platform/memory. Everything that counts allocations is inert in such a
+    # build, and has to say so rather than report a zero it did not measure.
+    if(VOLT_SANITIZER STREQUAL "asan" OR VOLT_SANITIZER STREQUAL "tsan")
+        target_compile_definitions(${target} PRIVATE VOLT_SANITIZER_OWNS_HEAP=1)
+    endif()
 endfunction()

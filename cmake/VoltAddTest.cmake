@@ -5,9 +5,10 @@
 #   volt_add_test(<name>
 #     SOURCES <src...>
 #     LINK <target...>
+#     [TIMEOUT <seconds>]
 #   )
 function(volt_add_test name)
-    cmake_parse_arguments(ARG "" "" "SOURCES;LINK" ${ARGN})
+    cmake_parse_arguments(ARG "" "TIMEOUT" "SOURCES;LINK" ${ARGN})
 
     add_executable(${name} ${ARG_SOURCES})
     target_compile_features(${name} PRIVATE cxx_std_23)
@@ -25,9 +26,15 @@ function(volt_add_test name)
     # a broken blocking call into a failure instead of a run that never ends:
     # a test waiting on a timer or a socket that a defect left unarmed would
     # otherwise hang the whole pipeline rather than report the defect.
+    # A suite that deliberately runs for a fixed span says so with TIMEOUT;
+    # everything else inherits the limit that turns a hang into a failure.
+    if(NOT ARG_TIMEOUT)
+        set(ARG_TIMEOUT 60)
+    endif()
+
     gtest_discover_tests(${name}
         NO_PRETTY_VALUES
         TEST_PREFIX "${name}."
-        PROPERTIES TIMEOUT 60
+        PROPERTIES TIMEOUT ${ARG_TIMEOUT}
     )
 endfunction()

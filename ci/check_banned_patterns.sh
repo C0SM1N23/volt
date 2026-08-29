@@ -53,11 +53,15 @@ check_i() {
 }
 
 # Same as check(), but with line comments blanked out first. Prose is allowed
-# to contain the words these patterns look for; code is not.
+# to contain the words these patterns look for; code is not. An optional third
+# argument names one file the pattern does not apply to.
 check_code() {
-    local description="$1" pattern="$2"
+    local description="$1" pattern="$2" exempt="${3:-}"
     local matches="" hit
     for f in "${files[@]}"; do
+        if [[ -n "$exempt" && "$f" == "$exempt" ]]; then
+            continue
+        fi
         hit="$(sed 's|//.*||' "$f" | grep -nE "$pattern" 2>/dev/null || true)"
         if [[ -n "$hit" ]]; then
             matches+="$(sed "s|^|${f}:|" <<<"$hit")"$'\n'
@@ -76,11 +80,21 @@ check_i "'for now' / 'temporary' / 'will be implemented later' phrasing" '(for n
 check_code "std::cout / std::endl usage"                  '\bstd::(cout|endl)\b'
 check "raw <iostream> include"                            '#include[[:space:]]*<iostream>'
 check_code "printf() usage"                               '\bprintf[[:space:]]*\('
+# The one file that is allowed to define the global allocation operators and to
+# call the C allocator. AGENTS.md 2.4 sends every allocation through
+# `platform/memory`, and this is where `platform/memory` ends up: somebody has
+# to be the heap. Anywhere else the ban stands (deviation DEV-008).
+allocator_owner="platform/memory/src/allocation_hooks.cpp"
+if [[ ! -f "$allocator_owner" ]]; then
+    echo "check_banned_patterns: the exempted allocator file $allocator_owner is missing"
+    exit 1
+fi
+
 # Allocation, not the `= delete` that suppresses a special member function: a
 # deleted copy constructor is how a polymorphic interface prevents slicing.
-check_code "operator new used directly"                   '\bnew[[:space:]]+[A-Za-z_][A-Za-z0-9_:<>]*[[:space:]]*[][({;]|\bnew[[:space:]]*\('
-check_code "operator delete used directly"                '\bdelete[[:space:]]+[A-Za-z_*(]|\bdelete[[:space:]]*\[[[:space:]]*\]'
-check_code "malloc/free used directly"                    '\b(malloc|calloc|realloc|free)[[:space:]]*\('
+check_code "operator new used directly"                   '\bnew[[:space:]]+[A-Za-z_][A-Za-z0-9_:<>]*[[:space:]]*[][({;]|\bnew[[:space:]]*\(' "$allocator_owner"
+check_code "operator delete used directly"                '\bdelete[[:space:]]+[A-Za-z_*(]|\bdelete[[:space:]]*\[[[:space:]]*\]' "$allocator_owner"
+check_code "malloc/free used directly"                    '\b(malloc|calloc|realloc|free)[[:space:]]*\(' "$allocator_owner"
 check_code "banned libc functions (rand/srand/strcpy/strcat/sprintf/gets/atoi)" \
                                                             '\b(rand|srand|strcpy|strcat|sprintf|gets|atoi)[[:space:]]*\('
 # Commented-out code is recognised by two things at once: the line ends the way
