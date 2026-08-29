@@ -34,3 +34,8 @@ if(VOLT_BUILD_TESTS)
 endif()
 
 add_subdirectory(platform/core)
+add_subdirectory(platform/pal)
+
+if(VOLT_BUILD_TESTS)
+    add_subdirectory(tests/pal_conformance)
+endif()
