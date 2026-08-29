@@ -226,6 +226,10 @@ Comentariile sunt parte din cod si se recenzeaza la fel de sever.
 
 ## 10. Git si documentatie
 
+10.0 NEVER apare vreun semn de AI in istoricul git. Fara `Co-Authored-By` catre un
+     model, fara "Generated with", fara mentiuni de asistent in mesaj, corp, tag sau
+     descriere de PR. Autorul e omul care raspunde de cod. Mesajele sunt scurte si
+     naturale, in engleza, scrise ca de un inginer, nu explicative sau emfatice.
 10.1 MUST: un commit = o schimbare logica. Mesaj in format `tip(scop): descriere la imperativ`.
 10.2 MUST: commit-urile care ating performanta contin in corp masuratoarea inainte/dupa.
 10.3 NEVER merge cu CI rosu. NEVER dezactivarea unui test ca sa treaca pipeline-ul.
