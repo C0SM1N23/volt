@@ -83,10 +83,11 @@ check_code "operator delete used directly"                '\bdelete[[:space:]]+[
 check_code "malloc/free used directly"                    '\b(malloc|calloc|realloc|free)[[:space:]]*\('
 check_code "banned libc functions (rand/srand/strcpy/strcat/sprintf/gets/atoi)" \
                                                             '\b(rand|srand|strcpy|strcat|sprintf|gets|atoi)[[:space:]]*\('
-# Commented-out code is recognised by the line ending the way a statement or a
-# block does. Matching a ';' anywhere instead would flag ordinary prose, since
-# a semicolon is also punctuation.
-check "commented-out code (// line ending in ; { or })"    '^[[:space:]]*//.*[;{}][[:space:]]*$'
+# Commented-out code is recognised by two things at once: the line ends the way
+# a statement or a block does, and it is not a documentation comment. Matching a
+# ';' anywhere would flag ordinary prose, since a semicolon is also punctuation,
+# and code is not commented out with '///'.
+check "commented-out code (// line ending in ; { or })"    '^[[:space:]]*//([^/].*)?[;{}][[:space:]]*$'
 
 # #define outside the macro allow-list (VOLT_TRY, VOLT_ASSERT, VOLT_LOG_*,
 # VOLT_TRACE, VOLT_CHECKPOINT, VOLT_LOOP_BOUND).
