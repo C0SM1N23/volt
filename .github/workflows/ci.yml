@@ -69,7 +69,7 @@ jobs:
           chmod +x llvm.sh
           sudo ./llvm.sh "${LLVM_VERSION}"
           sudo apt-get install -y \
-            "clang-tidy-${LLVM_VERSION}" ninja-build libgtest-dev libgmock-dev
+            "clang-tidy-${LLVM_VERSION}" ninja-build libgtest-dev libgmock-dev libyaml-cpp-dev
 
       # clang-tidy reads the compile database, so it must be produced by the
       # same compiler family or it trips over flags clang does not accept.
@@ -93,7 +93,7 @@ jobs:
       - name: Install toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build ccache libgtest-dev libgmock-dev
+          sudo apt-get install -y ninja-build ccache libgtest-dev libgmock-dev libyaml-cpp-dev
           if [[ "${{ matrix.compiler }}" == clang-* ]]; then
             wget -qO llvm.sh https://apt.llvm.org/llvm.sh
             chmod +x llvm.sh
@@ -142,7 +142,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             ninja-build "gcc-${GCC_VERSION}" "g++-${GCC_VERSION}" \
-            libgtest-dev libgmock-dev
+            libgtest-dev libgmock-dev libyaml-cpp-dev
 
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}
@@ -170,7 +170,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             ninja-build "gcc-${GCC_VERSION}" "g++-${GCC_VERSION}" \
-            libgtest-dev libgmock-dev lcov
+            libgtest-dev libgmock-dev libyaml-cpp-dev lcov
 
       - name: Build and test
         run: |
