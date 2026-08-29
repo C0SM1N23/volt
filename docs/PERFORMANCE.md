@@ -81,3 +81,62 @@ Invariantul verificat este `scrise + aruncate == produse`.
 Aruncarea sub incarcare e comportament proiectat, nu defect: un producator care
 gaseste ring-ul plin arunca inregistrarea si o numara, fiindca a bloca un ciclu
 de control ca sa incapa o linie de log nu e niciodata compromisul corect.
+
+---
+
+## K12 — Overhead-ul tracing-ului activat
+
+**Tinta:** SPEC §0.2 K12 cere sub 2% cand tracing-ul e pornit.
+
+**Ce se masoara:** acelasi binar ruleaza acelasi ciclu de control cu tracing-ul
+oprit si pornit; diferenta e overhead-ul. Comutarea e la rulare, nu la
+compilare, fiindca intrebarea din K12 e cat costa tracing-ul *activat*, nu cat
+costa codul care nu exista.
+
+**Ciclul folosit:** ~89 µs de lucru cu 10 puncte de trasare, dimensionat din
+SPEC §8.1 (task safety-critical pe perioada de 1 ms, cu buget de cateva sute de
+microsecunde). Masurarea fata de o bucla care se termina in nanosecunde ar
+raporta costul unui punct de trasare raportat la nimic, ceea ce nu e intrebarea.
+
+**Cum:** `platform/trace/tests/trace_benchmark_test.cpp`, 20 de loturi × 5
+cicluri, mediana, cu incalzire aruncata explicit.
+
+| Metrica | Valoare |
+|---|---|
+| Ciclu cu tracing oprit | ~89.0 µs |
+| Ciclu cu tracing pornit | ~89.1 µs |
+| **Overhead** | **0,1 – 0,2 %** (5 rulari) |
+| Cost per eveniment | 18 – 30 ns |
+
+**Mediu:** identic cu L1 — AMD Ryzen 7 7435HS, Ubuntu 26.04, GCC 14.3, build
+`dev` (`-O0 -g`), kernel generic.
+
+**Observatii oneste:**
+- Cifrele sunt de pe un build neoptimizat. Pe `release` costul per eveniment
+  scade; se raporteaza cel mai defavorabil caz.
+- Prima masuratoare dupa pornire da un cost per eveniment mai mare (~90 ns),
+  fiindca liniile de cache ale ring-ului sunt reci. De aceea exista incalzire.
+- Testul sare sub sanitizer sau sub coverage: instrumentarea numara fiecare
+  acces la memorie, deci diferenta masurata acolo e a uneltei, nu a codului.
+
+**Ce a schimbat cifra:** variabila thread-local a punctului de trasare folosea
+modelul TLS implicit, care intr-o biblioteca inseamna un apel in loader la
+fiecare acces. Cu `initial-exec` accesul devine o citire relativa la registru.
+
+---
+
+## T1 — Conservarea evenimentelor de trasare sub incarcare
+
+**Tinta:** niciun eveniment pierdut fara sa fie contorizat.
+
+**Ce se masoara:** 4 fire × 2.500.000 de evenimente (10 milioane in total), cu
+un colector care goleste ring-urile in paralel. Invariantul verificat este
+`colectate + aruncate == produse`.
+
+**Cum:** `platform/trace/tests/trace_benchmark_test.cpp`, rulat si sub TSan.
+
+| Metrica | Valoare |
+|---|---|
+| Evenimente produse | 10.000.000 |
+| Pierdute necontorizate | **0** |
+| Data races raportate de TSan | **0** |

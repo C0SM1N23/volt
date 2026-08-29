@@ -129,3 +129,25 @@ opusul a ce trebuie sa faca un test.
 si regula 3.11 din AGENTS.md (maxim ~50 de linii, maxim 3 niveluri) se aplica
 in continuare — mai multe functii din `platform/log` au fost impartite tocmai
 fiindca le depaseau.
+
+---
+
+## DEV-007 — `performance-enum-size` in `platform/trace/include/volt/trace/trace_event.hpp`
+
+**Regula semnalata:** enum-ul foloseste un tip de baza mai larg decat i-ar
+trebui pentru valorile pe care le are.
+
+**Unde:** `TraceEvent`, declarat pe `std::uint16_t` desi lista actuala incape pe
+opt biti.
+
+**De ce se deviaza:** latimea nu e aleasa dupa valorile de azi, ci dupa formatul
+inregistrarii. `TraceRecord` rezerva doi octeti pentru identificator si isi
+imparte restul bugetului de saisprezece octeti in jurul lor. Ingustarea
+enum-ului ar muta fiecare camp de dupa el, deci ar face ilizibila orice captura
+luata inainte — exact ce evita rezervarea.
+
+**De ce nu exista alternativa mai buna:** un enum pe opt biti cu un camp de
+umplutura alaturi ar ocupa aceiasi doi octeti si ar ascunde motivul.
+
+**Limitele deviatiei:** exclusiv acest enum. Orice alt enum care nu ajunge pe
+disc isi ia latimea minima.
