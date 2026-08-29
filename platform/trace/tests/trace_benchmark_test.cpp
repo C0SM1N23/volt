@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -30,7 +31,15 @@ constexpr bool kInstrumented = false;
 constexpr int kWorkPerCycle = 100'000;
 constexpr int kTracePointsPerCycle = 10;
 constexpr int kCyclesPerBatch = 5;
-constexpr int kBatches = 20;
+constexpr std::size_t kBatches = 20;
+
+// Alternating A/B and B/A pairs cancels monotonic frequency or host-load drift
+// without weakening the K12 limit. Changing the order count changes how often
+// either state pays a boundary effect in the benchmark.
+constexpr std::array<std::array<TraceState, 2>, 2> kBatchOrders{{
+    {TraceState::kDisabled, TraceState::kEnabled},
+    {TraceState::kEnabled, TraceState::kDisabled},
+}};
 
 // K12 of SPEC 0.2: turning tracing on costs under two percent.
 constexpr double kOverheadBudget = 0.02;
@@ -64,28 +73,57 @@ void trace_one_cycle(std::uint32_t task) noexcept {
   VOLT_TRACE(TraceEvent::kTaskEnd, task);
 }
 
-/// Runs the workload and returns the median nanoseconds per cycle.
-[[nodiscard]] std::int64_t measure(pal::IPlatform &platform, TraceState state) {
+/// Carries the robust center of the paired A/B samples.
+struct Measurement {
+  std::int64_t without_tracing_ns;
+  std::int64_t with_tracing_ns;
+  double overhead;
+};
+
+/// Maps the two-state enum onto the fixed measurement arrays.
+[[nodiscard]] constexpr std::size_t state_index(TraceState state) noexcept {
+  return static_cast<std::size_t>(state);
+}
+
+/// Runs one timed batch in the requested tracing state.
+[[nodiscard]] std::int64_t measure_batch(pal::IPlatform &platform, TraceState state,
+                                         std::uint64_t &sink) {
   Tracer::instance().set_state(state);
 
-  std::vector<std::int64_t> per_cycle_ns;
-  per_cycle_ns.reserve(kBatches);
+  const core::Timestamp start = platform.clock().monotonic();
+  for (int cycle = 0; cycle < kCyclesPerBatch; ++cycle) {
+    trace_one_cycle(static_cast<std::uint32_t>(cycle));
+    sink = simulated_cycle(sink);
+  }
+  const core::Timestamp finish = platform.clock().monotonic();
+  static_cast<void>(collect(Tracer::instance()));
+  return finish.checked_since(start).value().ns() / kCyclesPerBatch;
+}
+
+/// Runs paired A/B batches and returns the median-overhead sample.
+[[nodiscard]] Measurement measure(pal::IPlatform &platform) {
+  std::array<Measurement, kBatches> measurements{};
   std::uint64_t sink = 1;
 
-  for (int batch = 0; batch < kBatches; ++batch) {
-    const core::Timestamp start = platform.clock().monotonic();
-    for (int cycle = 0; cycle < kCyclesPerBatch; ++cycle) {
-      trace_one_cycle(static_cast<std::uint32_t>(cycle));
-      sink = simulated_cycle(sink);
+  for (std::size_t batch = 0; batch < kBatches; ++batch) {
+    std::array<std::int64_t, 2> pair_ns{};
+    const std::array<TraceState, 2> &order = kBatchOrders[batch % kBatchOrders.size()];
+    for (const TraceState state : order) {
+      pair_ns[state_index(state)] = measure_batch(platform, state, sink);
     }
-    const core::Timestamp finish = platform.clock().monotonic();
-    per_cycle_ns.push_back(finish.checked_since(start).value().ns() / kCyclesPerBatch);
-    static_cast<void>(collect(Tracer::instance()));
+    const std::int64_t without_tracing_ns = pair_ns[state_index(TraceState::kDisabled)];
+    const std::int64_t with_tracing_ns = pair_ns[state_index(TraceState::kEnabled)];
+    measurements[batch] =
+        Measurement{.without_tracing_ns = without_tracing_ns,
+                    .with_tracing_ns = with_tracing_ns,
+                    .overhead = static_cast<double>(with_tracing_ns - without_tracing_ns) /
+                                static_cast<double>(without_tracing_ns)};
   }
 
   EXPECT_NE(sink, 0U);
-  std::ranges::sort(per_cycle_ns);
-  return per_cycle_ns[per_cycle_ns.size() / 2];
+  std::ranges::sort(measurements, {}, &Measurement::overhead);
+  constexpr std::size_t kMedianIndex = kBatches / 2;
+  return measurements[kMedianIndex];
 }
 
 TEST(TraceBenchmarkTest, TurningTracingOnCostsLessThanTwoPercent) {
@@ -102,26 +140,24 @@ TEST(TraceBenchmarkTest, TurningTracingOnCostsLessThanTwoPercent) {
   Tracer::instance().calibrate(platform.clock(), core::Duration::from_ms(20));
 
   // Warm up so neither measurement pays the first-touch cost of the ring.
-  static_cast<void>(measure(platform, TraceState::kEnabled));
+  static_cast<void>(measure(platform));
 
-  const std::int64_t without_tracing = measure(platform, TraceState::kDisabled);
-  const std::int64_t with_tracing = measure(platform, TraceState::kEnabled);
+  const Measurement measurement = measure(platform);
   Tracer::instance().set_state(TraceState::kDisabled);
 
-  ASSERT_GT(without_tracing, 0);
-  const double overhead =
-      static_cast<double>(with_tracing - without_tracing) / static_cast<double>(without_tracing);
-  const std::int64_t per_event_ns = (with_tracing - without_tracing) / kTracePointsPerCycle;
+  ASSERT_GT(measurement.without_tracing_ns, 0);
+  const std::int64_t per_event_ns =
+      (measurement.with_tracing_ns - measurement.without_tracing_ns) / kTracePointsPerCycle;
 
-  RecordProperty("cycle_ns_without_tracing", static_cast<int>(without_tracing));
-  RecordProperty("cycle_ns_with_tracing", static_cast<int>(with_tracing));
+  RecordProperty("cycle_ns_without_tracing", static_cast<int>(measurement.without_tracing_ns));
+  RecordProperty("cycle_ns_with_tracing", static_cast<int>(measurement.with_tracing_ns));
   RecordProperty("trace_points_per_cycle", kTracePointsPerCycle);
   RecordProperty("per_event_ns", static_cast<int>(per_event_ns));
-  RecordProperty("overhead_per_mille", static_cast<int>(overhead * 1000.0));
+  RecordProperty("overhead_per_mille", static_cast<int>(measurement.overhead * 1000.0));
 
-  EXPECT_LT(overhead, kOverheadBudget)
-      << "off=" << without_tracing << "ns on=" << with_tracing
-      << "ns overhead=" << (overhead * 100.0) << "% per_event=" << per_event_ns << "ns";
+  EXPECT_LT(measurement.overhead, kOverheadBudget)
+      << "off=" << measurement.without_tracing_ns << "ns on=" << measurement.with_tracing_ns
+      << "ns overhead=" << (measurement.overhead * 100.0) << "% per_event=" << per_event_ns << "ns";
 }
 
 /// Counts producers that have finished, so the collector knows when to stop.

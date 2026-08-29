@@ -98,15 +98,18 @@ SPEC §8.1 (task safety-critical pe perioada de 1 ms, cu buget de cateva sute de
 microsecunde). Masurarea fata de o bucla care se termina in nanosecunde ar
 raporta costul unui punct de trasare raportat la nimic, ceea ce nu e intrebarea.
 
-**Cum:** `platform/trace/tests/trace_benchmark_test.cpp`, 20 de loturi × 5
-cicluri, mediana, cu incalzire aruncata explicit.
+**Cum:** `platform/trace/tests/trace_benchmark_test.cpp`, 20 de perechi de
+loturi × 5 cicluri, in ordine A/B si B/A alternata, cu mediana diferentelor
+pereche si cu incalzire aruncata explicit. Intercalarea impiedica deriva de
+frecventa CPU sau de incarcare a hostului dintre doua faze lungi sa fie
+raportata drept cost de tracing.
 
 | Metrica | Valoare |
 |---|---|
-| Ciclu cu tracing oprit | ~89.0 µs |
-| Ciclu cu tracing pornit | ~89.1 µs |
-| **Overhead** | **0,1 – 0,2 %** (5 rulari) |
-| Cost per eveniment | 18 – 30 ns |
+| Ciclu cu tracing oprit | 90,7 µs |
+| Ciclu cu tracing pornit | 91,4 µs |
+| **Overhead** | **0,81 %** (cel mai slab; interval 0,02 – 0,81 %, 2 rulari) |
+| Cost per eveniment | 73 ns (cel mai slab; interval 2 – 73 ns) |
 
 **Mediu:** identic cu L1 — AMD Ryzen 7 7435HS, Ubuntu 26.04, GCC 14.3, build
 `dev` (`-O0 -g`), kernel generic.
