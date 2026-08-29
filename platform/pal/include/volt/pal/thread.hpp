@@ -27,6 +27,13 @@ enum class SchedulingPolicy : std::uint8_t {
 /// more cores would need a wider mask here and in the POSIX backend.
 using CpuMask = std::uint64_t;
 
+/// Longest thread name a backend is required to keep.
+///
+/// Chosen from the tightest target: Linux accepts 16 bytes including the
+/// terminator. Stating it here rather than in one backend means every backend
+/// truncates at the same point, so a name is not a portability surprise.
+inline constexpr std::size_t kMaxThreadNameLength = 15;
+
 /// What a thread must be told at creation. SPEC 42.2 requires every VOLT
 /// thread to state its name, priority and affinity rather than inherit them.
 struct ThreadConfig {

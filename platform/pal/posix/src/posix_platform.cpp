@@ -28,11 +28,6 @@
 namespace volt::pal::posix {
 namespace {
 
-// pthread_setname_np accepts 16 bytes including the terminator, so a longer
-// name is truncated rather than rejected: a thread that runs with a shortened
-// name is better than a service that refuses to start over a label.
-constexpr std::size_t kMaxThreadNameLength = 15;
-
 // Owner-writable, world-readable. Logs and traces are meant to be collected by
 // a developer, and nothing VOLT writes to a plain file is a secret.
 constexpr ::mode_t kCreatedFilePermissions = 0644;
