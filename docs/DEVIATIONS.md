@@ -60,3 +60,28 @@ exact proprietatea pe care un test o cere.
 **Limitele deviatiei:** doar codul de test. In cod de productie, orice sursa de
 aleator trece prin `Environment` (SPEC 4/D1), unde seed-ul e injectat, nu fixat
 in cod.
+
+---
+
+## DEV-004 — `readability-redundant-member-init`, dezactivata global
+
+**Regula semnalata:** initializatorul unui membru e redundant cand tipul are
+deja un constructor implicit care il aduce in aceeasi stare.
+
+**Unde:** dezactivata in `.clang-tidy` din radacina.
+
+**De ce se deviaza:** regula intra in conflict direct cu un warning al
+compilatorului, care e eroare prin setul din SPEC 7.1. Un membru fara
+initializator explicit face ca orice construire cu designated initializers care
+nu il numeste sa produca `-Wmissing-designated-field-initializers`. Cum
+`-Werror` e activ peste tot, respectarea regulii clang-tidy ar opri build-ul.
+Exemplu concret: `ThreadConfig{.name = "x"}` in suita de conformanta PAL.
+
+**De ce compilatorul are prioritate:** un initializator explicit pe fiecare
+camp al unei structuri de configuratie spune care e valoarea implicita la locul
+declaratiei, ceea ce e util oricum; regula clang-tidy castiga doar o linie mai
+scurta.
+
+**Limitele deviatiei:** doar acest check. Membrii tot trebuie initializati; ce
+se accepta e ca initializarea sa fie scrisa chiar si acolo unde constructorul
+implicit ar fi facut acelasi lucru.

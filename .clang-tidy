@@ -9,7 +9,8 @@ Checks: >
   google-build-using-namespace,
   modernize-use-nodiscard,
   performance-*,
-  readability-*
+  readability-*,
+  -readability-redundant-member-init
 
 WarningsAsErrors: '*'
 HeaderFilterRegex: 'include/volt/'
