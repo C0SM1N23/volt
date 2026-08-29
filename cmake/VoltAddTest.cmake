@@ -16,5 +16,17 @@ function(volt_add_test name)
     target_link_libraries(${name} PRIVATE GTest::gtest GTest::gtest_main ${ARG_LINK})
 
     include(GoogleTest)
-    gtest_discover_tests(${name} NO_PRETTY_VALUES)
+    # The target name prefixes every case so `ctest -R <target>` selects one
+    # module's tests. Without it the ctest name is whatever GoogleTest derived
+    # from the fixture, which says nothing about where the test lives.
+    #
+    # Generous next to a suite that should finish in milliseconds, but it turns
+    # a broken blocking call into a failure instead of a run that never ends:
+    # a test waiting on a timer or a socket that a defect left unarmed would
+    # otherwise hang the whole pipeline rather than report the defect.
+    gtest_discover_tests(${name}
+        NO_PRETTY_VALUES
+        TEST_PREFIX "${name}."
+        PROPERTIES TIMEOUT 60
+    )
 endfunction()
