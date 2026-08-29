@@ -1,3 +1,5 @@
+#include "allocation_test_support.hpp"
+
 #include "volt/memory/allocation_metrics.hpp"
 #include "volt/memory/allocation_stats.hpp"
 #include "volt/memory/allocation_tracker.hpp"
@@ -78,7 +80,7 @@ TEST(AllocationTrackerTest, CountsOneAllocationAndItsRelease) {
 
   AllocationStats during{};
   {
-    const ByteBlock block(kBlockBytes);
+    const ByteBlock block = test_support::allocate_block(kBlockBytes);
     during = AllocationTracker::current_thread_stats();
   }
   const AllocationStats after = AllocationTracker::current_thread_stats();
@@ -101,7 +103,7 @@ TEST(AllocationTrackerTest, KeepsTheHighWaterMarkAfterTheBlockIsReleased) {
 
   AllocationStats during{};
   {
-    const ByteBlock block(kBlockBytes);
+    const ByteBlock block = test_support::allocate_block(kBlockBytes);
     during = AllocationTracker::current_thread_stats();
   }
   const AllocationStats after = AllocationTracker::current_thread_stats();
@@ -119,13 +121,13 @@ TEST(AllocationTrackerTest, KeepsTheHighWaterMarkWhenALaterBlockIsSmaller) {
 
   AllocationStats at_high_water{};
   {
-    const ByteBlock large(kBlockBytes);
+    const ByteBlock large = test_support::allocate_block(kBlockBytes);
     at_high_water = AllocationTracker::current_thread_stats();
   }
 
   AllocationStats at_low_water{};
   {
-    const ByteBlock small(kSmallBlockBytes);
+    const ByteBlock small = test_support::allocate_block(kSmallBlockBytes);
     at_low_water = AllocationTracker::current_thread_stats();
   }
 
@@ -145,7 +147,7 @@ TEST(AllocationTrackerTest, CountsEveryThreadThatAllocatesIntoTheProcessTotal) {
   const core::expected<std::unique_ptr<pal::IThread>> worker =
       platform.create_thread(thread_config("volt-alloc-count"), [] {
         const AllocationStats start = AllocationTracker::current_thread_stats();
-        const ByteBlock block(kBlockBytes);
+        const ByteBlock block = test_support::allocate_block(kBlockBytes);
         const AllocationStats held = AllocationTracker::current_thread_stats();
         EXPECT_EQ(held.live_bytes, start.live_bytes + kBlockBytes);
       });
@@ -168,8 +170,10 @@ TEST(AllocationTrackerTest, CreditsAReleaseToTheThreadThatAllocated) {
   ByteBlock handover;
   {
     pal::posix::PosixPlatform platform;
-    const core::expected<std::unique_ptr<pal::IThread>> producer = platform.create_thread(
-        thread_config("volt-alloc-owner"), [&handover] { handover = ByteBlock(kBlockBytes); });
+    const core::expected<std::unique_ptr<pal::IThread>> producer =
+        platform.create_thread(thread_config("volt-alloc-owner"), [&handover] {
+          handover = test_support::allocate_block(kBlockBytes);
+        });
     ASSERT_TRUE(producer.has_value());
     ASSERT_TRUE((*producer)->join().has_value());
   }
@@ -231,7 +235,7 @@ TEST(NoAllocScopeTest, StopsGuardingOnceTheScopeEnds) {
   }
 
   const AllocationStats before = AllocationTracker::current_thread_stats();
-  const ByteBlock block(kBlockBytes);
+  const ByteBlock block = test_support::allocate_block(kBlockBytes);
   const AllocationStats after = AllocationTracker::current_thread_stats();
 
   EXPECT_EQ(after.allocation_count, before.allocation_count + 1);
@@ -297,7 +301,7 @@ TEST(AllocationMetricsTest, PublishesExactlyWhatTheTrackerCounted) {
   EXPECT_TRUE(AllocationMetrics::measurable());
 
   {
-    const ByteBlock block(kBlockBytes);
+    const ByteBlock block = test_support::allocate_block(kBlockBytes);
     EXPECT_EQ(block.size(), kBlockBytes);
   }
 
@@ -351,7 +355,7 @@ TEST(AllocationMetricsTest, AdvancesItsCountersByWhatHappenedBetweenRefreshes) {
   }
 
   {
-    const ByteBlock block(kBlockBytes);
+    const ByteBlock block = test_support::allocate_block(kBlockBytes);
     EXPECT_EQ(block.size(), kBlockBytes);
   }
 
@@ -399,7 +403,7 @@ TEST(AllocationMetricsTest, CountsAGuardViolationIntoTheMetricThatCarriesK10) {
 
   {
     const no_alloc_scope guard;
-    const ByteBlock forbidden(kBlockBytes);
+    const ByteBlock forbidden = test_support::allocate_block(kBlockBytes);
     EXPECT_EQ(forbidden.size(), kBlockBytes);
   }
 
@@ -425,7 +429,7 @@ TEST(NoAllocScopeTest, CountsTheViolationAndKeepsRunningInARelease) {
   std::size_t block_bytes = 0;
   {
     const no_alloc_scope guard;
-    const ByteBlock block(kBlockBytes);
+    const ByteBlock block = test_support::allocate_block(kBlockBytes);
     block_bytes = block.size();
     violations = guard.violations();
   }
@@ -447,7 +451,7 @@ TEST(NoAllocScopeDeathTest, EndsTheProcessAtTheFirstAllocationInADebugBuild) {
   EXPECT_DEATH(
       {
         const no_alloc_scope guard;
-        const ByteBlock block(kBlockBytes);
+        const ByteBlock block = test_support::allocate_block(kBlockBytes);
       },
       "inside a no_alloc_scope");
 }

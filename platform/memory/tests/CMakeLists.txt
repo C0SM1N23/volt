@@ -24,7 +24,9 @@ volt_add_test(memory_queue_model_tests
 )
 
 volt_add_test(memory_allocation_tests
-    SOURCES allocation_test.cpp
+    SOURCES
+        allocation_test.cpp
+        allocation_test_support.cpp
     LINK volt::memory volt::pal_posix
 )
 
