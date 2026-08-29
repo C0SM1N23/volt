@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
 # Rejects symbols that must never reach the data plane. The patterns live in
-# tools/forbidden_symbols.txt so that adding one does not mean touching this
+# ci/forbidden_symbols.txt so that adding one does not mean touching this
 # script. SPEC 7.3 restricts the scan to services/ and safety/.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-symbol_list="tools/forbidden_symbols.txt"
+symbol_list="ci/forbidden_symbols.txt"
 if [[ ! -f "$symbol_list" ]]; then
     echo "check_forbidden_symbols: missing symbol list at $symbol_list" >&2
     exit 1
 fi
 
-scan_dirs=(services safety)
+if [[ "$#" -gt 0 ]]; then
+    scan_dirs=("$@")
+else
+    scan_dirs=(services safety)
+fi
 existing_dirs=()
 for dir in "${scan_dirs[@]}"; do
     [[ -d "$dir" ]] && existing_dirs+=("$dir")

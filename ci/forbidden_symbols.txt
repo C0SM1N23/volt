@@ -1,0 +1,11 @@
+# Symbols actors may reach only through Environment, one extended regular
+# expression per line. The gate scans services/ and safety/ source before any
+# compiler optimization can erase a forbidden call.
+\bclock_gettime[[:space:]]*\(
+\bgettimeofday[[:space:]]*\(
+\bmalloc[[:space:]]*\(
+\bfree[[:space:]]*\(
+\bsocket[[:space:]]*\(
+\brand[[:space:]]*\(
+\bprintf[[:space:]]*\(
+\bstd::cout\b

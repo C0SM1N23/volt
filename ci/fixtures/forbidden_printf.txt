@@ -1,0 +1,7 @@
+#include <cstdio>
+
+namespace volt::services {
+
+void violates_environment_boundary() { printf("forbidden"); }
+
+} // namespace volt::services
