@@ -52,9 +52,11 @@ template <typename T> using expected = core::expected<T>;
 
 /// Halts when `cond` does not hold, because continuing would run on a state
 /// the code has already proven impossible.
+///
+/// Written as one conditional expression rather than a braced statement: a
+/// braced form adds two nesting levels to whatever function uses it, which
+/// would push ordinary code past the nesting limit of AGENTS.md 3.11 and
+/// reward removing the check.
 #define VOLT_ASSERT(cond, msg)                                                                     \
-  do {                                                                                             \
-    if (!(cond)) {                                                                                 \
-      ::volt::core::assert_failed(#cond, (msg), __FILE__, __LINE__);                               \
-    }                                                                                              \
-  } while (false)
+  (static_cast<bool>(cond) ? static_cast<void>(0)                                                  \
+                           : ::volt::core::assert_failed(#cond, (msg), __FILE__, __LINE__))
