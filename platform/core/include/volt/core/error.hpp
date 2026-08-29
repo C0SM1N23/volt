@@ -2,6 +2,7 @@
 
 #include "error_code.hpp"
 
+#include <cstddef>
 #include <cstdlib>
 #include <expected>
 
@@ -60,3 +61,11 @@ template <typename T> using expected = core::expected<T>;
 #define VOLT_ASSERT(cond, msg)                                                                     \
   (static_cast<bool>(cond) ? static_cast<void>(0)                                                  \
                            : ::volt::core::assert_failed(#cond, (msg), __FILE__, __LINE__))
+
+/// Makes the compile-time bound of a data-plane loop mechanically visible.
+///
+/// A positive bound is required because a zero-sized critical loop is dead
+/// code and should be removed instead of being annotated (AGENTS.md 5.7).
+#define VOLT_LOOP_BOUND(bound)                                                                     \
+  static_assert(static_cast<::std::size_t>(bound) > static_cast<::std::size_t>(0),                 \
+                "a critical loop must have a positive compile-time bound")

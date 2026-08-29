@@ -1,0 +1,11 @@
+# Test assertions and third-party property macros expand into branches that are
+# not present in the source. These test-only checks do not describe production
+# complexity or magic-number policy.
+InheritParentConfig: true
+Checks: >
+  -readability-magic-numbers,
+  -readability-function-size,
+  -readability-function-cognitive-complexity,
+  -bugprone-easily-swappable-parameters,
+  -cert-msc32-c,
+  -cert-msc51-cpp

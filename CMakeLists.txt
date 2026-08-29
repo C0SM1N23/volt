@@ -40,6 +40,7 @@ add_subdirectory(platform/pal)
 add_subdirectory(platform/log)
 add_subdirectory(platform/trace)
 add_subdirectory(platform/config)
+add_subdirectory(platform/memory)
 
 if(VOLT_BUILD_TOOLS)
     add_subdirectory(tools)

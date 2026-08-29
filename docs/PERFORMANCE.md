@@ -140,3 +140,72 @@ un colector care goleste ring-urile in paralel. Invariantul verificat este
 | Evenimente produse | 10.000.000 |
 | Pierdute necontorizate | **0** |
 | Data races raportate de TSan | **0** |
+
+---
+
+## M1 — Latenta si throughput-ul cozilor marginite
+
+**Tinta:** P08 cere costul publicat pentru SPSC si MPSC, iar SPEC §8.3 cere
+cozi lock-free fara alocare pe calea de date.
+
+**Ce se masoara:** latenta este un round-trip local `try_push` + `try_pop`,
+masurat in 10.000 de loturi a cate 1.000 de operatii dupa incalzire. Citirile
+ceasului PAL incadreaza lotul, iar valorile sunt P50/P99 pe costul unei
+operatii din lot. Throughput-ul este end-to-end, cu producator si consumator pe
+fire PAL distincte: un producator pentru SPSC, patru pentru MPSC si 10 milioane
+de transferuri reusite in fiecare caz.
+
+**Cum:** `platform/memory/tests/memory_benchmark.cpp`, Google Benchmark, cinci
+repetitii. Comanda care regenereaza tabelul:
+
+```sh
+cmake --preset release
+cmake --build --preset release --target memory_benchmarks
+build/release/platform/memory/tests/memory_benchmarks \
+  --benchmark_min_time=0.5s \
+  --benchmark_repetitions=5 \
+  --benchmark_report_aggregates_only=true
+```
+
+| Coada | Latenta P50 | Latenta P99 | Cost transfer concurent | Throughput median |
+|---|---:|---:|---:|---:|
+| SPSC, 1 producator | **1,372 ns** | **1,383 ns** | **13,0 ns** | **76,88 M mesaje/s** |
+| MPSC, 4 producatori | **2,905 ns** | **2,936 ns** | **74,5 ns** | **13,42 M mesaje/s** |
+
+Latentele locale sunt stabile intre rulari (cv sub 0,3%). Cifrele concurente se
+misca cu incarcarea masinii: pe doua rulari consecutive, SPSC a dat 11,0-13,0 ns
+(76,9-91,1 M mesaje/s) si MPSC 74,5-78,6 ns (12,7-13,4 M mesaje/s). Tabelul
+contine rularea cea mai lenta din cele doua, nu cea mai favorabila.
+
+**Mediu:** AMD Ryzen 7 7435HS, 16 fire logice, Ubuntu 26.04.1, GCC 14.3,
+build `release` (`-O3`), kernel generic. CPU scaling si boost au ramas active,
+fara izolare de CPU; biblioteca Google Benchmark a distributiei este construita
+in mod debug. Acestea sunt rezultate reproductibile pe masina de dezvoltare,
+nu cifre pentru tinta PREEMPT_RT din SPEC §25.
+
+**Observatii oneste:**
+
+- Latenta locala izoleaza costul structurii si nu include transferul intre
+  cache-urile a doua nuclee; masurarea concurenta include acel cost si este
+  cifra corecta pentru capacitatea end-to-end.
+- MPSC plateste compare-exchange pe cursor si secventa per slot, iar cei patru
+  producatori contesta aceeasi linie de cache. Diferenta fata de SPSC este
+  costul asteptat al topologiei, nu o pierdere de mesaje.
+- Inainte de P08 aceste primitive si benchmark-ul nu existau. Dupa P08, ambele
+  cozi ruleaza fara heap si fara blocare pe calea masurata, cu cifrele de mai sus.
+
+## M2 — Verificarea concurentei pentru memorie
+
+**Ce se masoara:** SPSC si MPSC transfera fiecare 10 milioane de valori sub
+TSan. Acelasi binar exercita un milion de publicari `SeqLock` cu trei cititori
+si un milion de transferuri de proprietate prin pool-ul atomic cu patru
+lucratori.
+
+**Cum:** `platform/memory/tests/queue_concurrency_test.cpp`, prin PAL POSIX.
+
+| Campanie | Operatii reusite | Pierderi sau dublari | Data races TSan |
+|---|---:|---:|---:|
+| SPSC | 10.000.000 | **0** | **0** |
+| MPSC, 4 producatori | 10.000.000 | **0** | **0** |
+| SeqLock, 3 cititori | 1.000.000 publicari | **0 valori mixte** | **0** |
+| AtomicFixedPool, 4 lucratori | 1.000.000 transferuri | **0 sloturi duble** | **0** |
