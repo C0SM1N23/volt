@@ -1,6 +1,7 @@
 volt_add_library(memory
     SOURCES
         src/allocation_hooks.cpp
+        src/allocation_metrics.cpp
         src/allocation_tracker.cpp
         src/arena.cpp
         src/frame_scope.cpp

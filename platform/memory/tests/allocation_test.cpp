@@ -1,8 +1,13 @@
+#include "volt/memory/allocation_metrics.hpp"
 #include "volt/memory/allocation_stats.hpp"
 #include "volt/memory/allocation_tracker.hpp"
 #include "volt/memory/no_alloc_scope.hpp"
 
 #include "volt/core/types.hpp"
+#include "volt/metrics/histogram_snapshot.hpp"
+#include "volt/metrics/metric_registry.hpp"
+#include "volt/metrics/metric_visitor.hpp"
+#include "volt/metrics/text_exporter.hpp"
 #include "volt/pal/posix/posix_platform.hpp"
 #include "volt/pal/thread.hpp"
 
@@ -11,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -232,10 +238,184 @@ TEST(NoAllocScopeTest, StopsGuardingOnceTheScopeEnds) {
   EXPECT_EQ(after.violation_count, before.violation_count);
 }
 
+/// Remembers the value of every metric a collection hands it, by name.
+///
+/// Allocation-free on purpose: the test collects inside a `no_alloc_scope` so
+/// that nothing can allocate between the refresh and the reading it is
+/// compared against, which is what makes an exact comparison possible.
+class ValueCapture final : public metrics::IMetricVisitor {
+public:
+  void visit_counter(const metrics::MetricSpec &spec, std::uint64_t value) noexcept override {
+    remember(spec.name, static_cast<double>(value));
+  }
+
+  void visit_gauge(const metrics::MetricSpec &spec, double value) noexcept override {
+    remember(spec.name, value);
+  }
+
+  void visit_histogram(const metrics::MetricSpec &spec,
+                       const metrics::HistogramSnapshot &snapshot) noexcept override {
+    remember(spec.name, static_cast<double>(snapshot.count));
+  }
+
+  /// Returns what `name` reported, or nothing when it was never collected.
+  [[nodiscard]] core::expected<double> value_of(std::string_view name) const noexcept {
+    for (std::size_t index = 0; index < count_; ++index) {
+      if (names_[index] == name) {
+        return values_[index];
+      }
+    }
+    return std::unexpected{core::ErrorCode::kInternalOutOfRange};
+  }
+
+private:
+  // Room for the six metrics the bridge publishes, with two to spare.
+  static constexpr std::size_t kCapacity = 8;
+
+  void remember(std::string_view name, double value) noexcept {
+    if (count_ == kCapacity) {
+      return;
+    }
+    names_[count_] = name;
+    values_[count_] = value;
+    ++count_;
+  }
+
+  std::array<std::string_view, kCapacity> names_{};
+  std::array<double, kCapacity> values_{};
+  std::size_t count_ = 0;
+};
+
+TEST(AllocationMetricsTest, PublishesExactlyWhatTheTrackerCounted) {
+  if (sanitizer_owns_heap()) {
+    GTEST_SKIP() << "a sanitizer runtime owns operator new in this build";
+  }
+
+  metrics::MetricRegistry registry;
+  AllocationMetrics published;
+  ASSERT_TRUE(published.register_with(registry).has_value());
+  EXPECT_TRUE(AllocationMetrics::measurable());
+
+  {
+    const ByteBlock block(kBlockBytes);
+    EXPECT_EQ(block.size(), kBlockBytes);
+  }
+
+  ValueCapture captured;
+  AllocationStats observed{};
+  {
+    // Nothing may allocate between the refresh and the reading it is compared
+    // against, or the two would be answers to different questions.
+    const no_alloc_scope guard;
+    published.refresh();
+    registry.collect(captured);
+    observed = AllocationTracker::instance().process_stats();
+  }
+
+  const core::expected<double> allocations = captured.value_of("volt_alloc_allocations_total");
+  const core::expected<double> bytes = captured.value_of("volt_alloc_bytes_total");
+  const core::expected<double> live = captured.value_of("volt_alloc_live_bytes");
+  const core::expected<double> peak = captured.value_of("volt_alloc_peak_bytes");
+  const core::expected<double> violations = captured.value_of("volt_alloc_violations_total");
+  const core::expected<double> threads = captured.value_of("volt_alloc_tracked_threads");
+  ASSERT_TRUE(allocations.has_value());
+  ASSERT_TRUE(bytes.has_value());
+  ASSERT_TRUE(live.has_value());
+  ASSERT_TRUE(peak.has_value());
+  ASSERT_TRUE(violations.has_value());
+  ASSERT_TRUE(threads.has_value());
+
+  EXPECT_EQ(*allocations, static_cast<double>(observed.allocation_count));
+  EXPECT_EQ(*bytes, static_cast<double>(observed.total_bytes));
+  EXPECT_EQ(*live, static_cast<double>(observed.live_bytes));
+  EXPECT_EQ(*peak, static_cast<double>(observed.peak_live_bytes));
+  EXPECT_EQ(*violations, static_cast<double>(observed.violation_count));
+  EXPECT_EQ(*threads, static_cast<double>(AllocationTracker::instance().tracked_threads()));
+  EXPECT_GT(*allocations, 0.0) << "the block above has to appear in the total";
+}
+
+TEST(AllocationMetricsTest, AdvancesItsCountersByWhatHappenedBetweenRefreshes) {
+  if (sanitizer_owns_heap()) {
+    GTEST_SKIP() << "a sanitizer runtime owns operator new in this build";
+  }
+
+  metrics::MetricRegistry registry;
+  AllocationMetrics published;
+  ASSERT_TRUE(published.register_with(registry).has_value());
+
+  ValueCapture before;
+  {
+    const no_alloc_scope guard;
+    published.refresh();
+    registry.collect(before);
+  }
+
+  {
+    const ByteBlock block(kBlockBytes);
+    EXPECT_EQ(block.size(), kBlockBytes);
+  }
+
+  ValueCapture after;
+  {
+    const no_alloc_scope guard;
+    published.refresh();
+    registry.collect(after);
+  }
+
+  const core::expected<double> allocations_before = before.value_of("volt_alloc_allocations_total");
+  const core::expected<double> allocations_after = after.value_of("volt_alloc_allocations_total");
+  const core::expected<double> bytes_before = before.value_of("volt_alloc_bytes_total");
+  const core::expected<double> bytes_after = after.value_of("volt_alloc_bytes_total");
+  ASSERT_TRUE(allocations_before.has_value());
+  ASSERT_TRUE(allocations_after.has_value());
+  ASSERT_TRUE(bytes_before.has_value());
+  ASSERT_TRUE(bytes_after.has_value());
+
+  // One block was allocated and released between the two scrapes, so the
+  // cumulative counters move by exactly that and the live total returns.
+  EXPECT_EQ(*allocations_after, *allocations_before + 1);
+  EXPECT_EQ(*bytes_after, *bytes_before + static_cast<double>(kBlockBytes));
+}
+
 #if defined(NDEBUG)
 
 // A release build counts the violation and traces it, and the guarded code
 // keeps running: SPEC 8.3 point 5 puts the decision to stop in a debug build.
+// It is also the only build in which the metric that carries K10 can be seen
+// moving, because in a debug build the first violation ends the process.
+// Room for a text dump of the allocation metrics, which is six short lines.
+constexpr std::size_t kDumpBytes = 1024;
+
+TEST(AllocationMetricsTest, CountsAGuardViolationIntoTheMetricThatCarriesK10) {
+  if (sanitizer_owns_heap()) {
+    GTEST_SKIP() << "a sanitizer runtime owns operator new in this build";
+  }
+
+  metrics::MetricRegistry registry;
+  AllocationMetrics published;
+  ASSERT_TRUE(published.register_with(registry).has_value());
+  published.refresh();
+  const std::uint64_t before = AllocationTracker::instance().process_stats().violation_count;
+
+  {
+    const no_alloc_scope guard;
+    const ByteBlock forbidden(kBlockBytes);
+    EXPECT_EQ(forbidden.size(), kBlockBytes);
+  }
+
+  published.refresh();
+  std::array<char, kDumpBytes> buffer{};
+  metrics::TextExporter dump{buffer};
+  registry.collect(dump);
+
+  const std::uint64_t after = AllocationTracker::instance().process_stats().violation_count;
+  EXPECT_EQ(after, before + 1);
+  EXPECT_NE(dump.view().find("volt_alloc_violations_total"), std::string_view::npos);
+  EXPECT_NE(dump.view().find(std::to_string(after)), std::string_view::npos)
+      << "the metric has to carry the count the tracker holds:\n"
+      << dump.view();
+}
+
 TEST(NoAllocScopeTest, CountsTheViolationAndKeepsRunningInARelease) {
   if (sanitizer_owns_heap()) {
     GTEST_SKIP() << "a sanitizer runtime owns operator new in this build";
