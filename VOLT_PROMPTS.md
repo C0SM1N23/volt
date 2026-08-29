@@ -677,6 +677,8 @@ Plus un test care verifica explicit ca setarea prioritatii RT esueaza *elegant* 
 
 ## P11 — IActor, Environment, mailbox, dispatcher
 
+- [x] Done
+
 **Citeste inainte:** SPEC §4 (D1 — cel mai important prompt din proiect), §12.1, §42.2.
 **Se leaga de:** P02-P10.
 
