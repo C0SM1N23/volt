@@ -52,13 +52,36 @@ check_i() {
     fi
 }
 
+# Same as check(), but with line comments blanked out first. Prose is allowed
+# to contain the words these patterns look for; code is not.
+check_code() {
+    local description="$1" pattern="$2"
+    local matches="" hit
+    for f in "${files[@]}"; do
+        hit="$(sed 's|//.*||' "$f" | grep -nE "$pattern" 2>/dev/null || true)"
+        if [[ -n "$hit" ]]; then
+            matches+="$(sed "s|^|${f}:|" <<<"$hit")"$'\n'
+        fi
+    done
+    if [[ -n "$matches" ]]; then
+        echo "BANNED: $description"
+        echo -n "$matches"
+        echo
+        failed=1
+    fi
+}
+
 check "TODO/FIXME/XXX/HACK markers"                       '\b(TODO|FIXME|XXX|HACK)\b'
 check_i "'for now' / 'temporary' / 'will be implemented later' phrasing" '(for now|temporary|will be implemented later)'
-check "std::cout / std::endl usage"                       '\bstd::(cout|endl)\b'
+check_code "std::cout / std::endl usage"                  '\bstd::(cout|endl)\b'
 check "raw <iostream> include"                            '#include[[:space:]]*<iostream>'
-check "printf() usage"                                    '\bprintf[[:space:]]*\('
-check "new/delete used directly"                          '\b(new|delete)\b'
-check "banned libc functions (rand/srand/strcpy/strcat/sprintf/gets/atoi)" \
+check_code "printf() usage"                               '\bprintf[[:space:]]*\('
+# Allocation, not the `= delete` that suppresses a special member function: a
+# deleted copy constructor is how a polymorphic interface prevents slicing.
+check_code "operator new used directly"                   '\bnew[[:space:]]+[A-Za-z_][A-Za-z0-9_:<>]*[[:space:]]*[][({;]|\bnew[[:space:]]*\('
+check_code "operator delete used directly"                '\bdelete[[:space:]]+[A-Za-z_*(]|\bdelete[[:space:]]*\[[[:space:]]*\]'
+check_code "malloc/free used directly"                    '\b(malloc|calloc|realloc|free)[[:space:]]*\('
+check_code "banned libc functions (rand/srand/strcpy/strcat/sprintf/gets/atoi)" \
                                                             '\b(rand|srand|strcpy|strcat|sprintf|gets|atoi)[[:space:]]*\('
 # Commented-out code is recognised by the line ending the way a statement or a
 # block does. Matching a ';' anywhere instead would flag ordinary prose, since
