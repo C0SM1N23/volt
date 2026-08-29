@@ -658,6 +658,8 @@ Plus un test care verifica explicit ca setarea prioritatii RT esueaza *elegant* 
 
 ## P10 — Metrici si endpoint Prometheus
 
+- [x] Done
+
 **Citeste inainte:** SPEC §22.4.
 **Se leaga de:** P05, P06.
 
