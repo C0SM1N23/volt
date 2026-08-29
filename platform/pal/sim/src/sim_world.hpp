@@ -87,6 +87,9 @@ public:
   /// Returns a file, or nothing when it does not exist.
   [[nodiscard]] std::vector<std::byte> *find_file(std::string_view path);
 
+  /// Reports whether the filesystem can take `additional` more bytes.
+  [[nodiscard]] bool file_system_can_grow(std::size_t additional) const noexcept;
+
   /// Declares that a program exists at `path` and how it ends.
   void register_program(std::string_view path, ProcessExit outcome);
 
@@ -118,6 +121,11 @@ private:
   std::map<std::string, std::vector<std::byte>, std::less<>> files_;
   std::map<std::string, ProcessExit, std::less<>> programs_;
   std::string watchdog_path_;
+
+  // Zero means the filesystem never fills, which is what every test that is
+  // not about a full disk wants.
+  std::uint64_t file_system_capacity_bytes_ = 0;
+
   std::int32_t next_process_id_ = 1;
 };
 

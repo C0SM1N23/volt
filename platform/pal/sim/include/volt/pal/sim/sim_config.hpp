@@ -59,6 +59,15 @@ struct SimConfig {
   /// would make two runs of the same scenario differ.
   core::Duration realtime_offset = core::Duration::from_s(kDefaultRealtimeOriginSeconds);
 
+  /// How many bytes every file in the world may hold together, or zero for no
+  /// limit.
+  ///
+  /// A simulated filesystem has no natural size, but the behaviour a full disk
+  /// forces — stop recording, keep what is already written, count the loss
+  /// (SPEC 42.3) — has to be exercised somewhere, and a real partition cannot
+  /// be filled from a unit test.
+  std::uint64_t file_system_capacity_bytes = 0;
+
   NetworkModel network{};
 };
 

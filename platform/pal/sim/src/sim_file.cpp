@@ -26,6 +26,12 @@ core::expected<std::size_t> SimFile::write(std::span<const std::byte> payload) n
   }
   const std::size_t end = offset_ + payload.size();
   if (end > content_->size()) {
+    const std::size_t growth = end - content_->size();
+    if (!world_->file_system_can_grow(growth)) {
+      // A full filesystem: the caller is told, and decides whether to stop
+      // recording or to fail. Nothing is written, so the file stays readable.
+      return std::unexpected{core::ErrorCode::kResourceExhausted};
+    }
     content_->resize(end, std::byte{0});
   }
   std::copy(payload.begin(), payload.end(),

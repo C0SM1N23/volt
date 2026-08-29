@@ -8,7 +8,8 @@ namespace volt::pal::sim::detail {
 SimWorld::SimWorld(const SimConfig &config) noexcept
     : random_{config.seed}, network_{random_, config.network},
       now_ns_{config.monotonic_origin.ns_since_epoch()},
-      realtime_offset_ns_{config.realtime_offset.ns()} {}
+      realtime_offset_ns_{config.realtime_offset.ns()},
+      file_system_capacity_bytes_{config.file_system_capacity_bytes} {}
 
 void SimWorld::advance_to(std::int64_t target_ns) noexcept {
   if (target_ns <= now_ns_) {
@@ -69,6 +70,17 @@ std::optional<ProcessExit> SimWorld::find_program(std::string_view path) const {
     return std::nullopt;
   }
   return entry->second;
+}
+
+bool SimWorld::file_system_can_grow(std::size_t additional) const noexcept {
+  if (file_system_capacity_bytes_ == 0) {
+    return true;
+  }
+  std::uint64_t used = 0;
+  for (const auto &[path, content] : files_) {
+    used += content.size();
+  }
+  return used + additional <= file_system_capacity_bytes_;
 }
 
 std::int32_t SimWorld::next_process_id() noexcept {
