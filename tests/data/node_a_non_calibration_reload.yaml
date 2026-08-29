@@ -1,0 +1,24 @@
+node:
+  id: NodeA
+  role: [COMPUTE, SAFETY]
+  interfaces: { can: can0, eth: eth0.10, diag_eth: eth0.20 }
+  rt: { isolated_cpus: [2, 3], mlockall: true, sched_reset_on_fork: true }
+cluster:
+  peers: [NodeB, NodeC]
+  raft: { election_timeout_ms: [150, 300], heartbeat_ms: 50 }
+  swim: { period_ms: 3, timeout_ms: 2, indirect_k: 2, indirect_ms: 3, suspect_ms: 5 }
+  can_heartbeat: { id: 0x400, period_ms: 5, miss_threshold: 3 }
+  ptp: { role: AUTO, sync_interval_ms: 125, max_offset_us: 100 }
+services:
+  - { name: SensorFusion, isolation: PROCESS, criticality: HIGH, period_us: 5000, cpu: [3],
+      replication: ACTIVE_STANDBY }
+  - { name: VehicleDynamics, isolation: PROCESS, criticality: HIGH, period_us: 10000, cpu: [3],
+      replication: ACTIVE_STANDBY }
+  - { name: BrakeControl, isolation: PARTITION, criticality: SAFETY_CRITICAL, period_us: 1000,
+      cpu: [2], sched: { policy: SCHED_FIFO, priority: 90 },
+      lease: { resource: BrakeActuator, class: FENCED, duration_ms: 30, renew_ms: 10,
+               self_yield_ms: 20, preauthorized_successor: NodeB },
+      replication: { mode: ACTIVE_STANDBY, sync_period_us: 5000, standby_on: [NodeB] } }
+  - { name: Diagnostics, isolation: PROCESS, criticality: MEDIUM, period_us: 20000, cpu: [1] }
+  - { name: Logging, isolation: THREAD, criticality: BEST_EFFORT, period_us: 100000, cpu: [0] }
+telemetry: { trace: true, metrics_port: 9102, record: false }

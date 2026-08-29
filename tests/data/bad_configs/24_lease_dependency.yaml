@@ -1,0 +1,4 @@
+services:
+  - { name: BrakeControl, isolation: PARTITION, criticality: HIGH, period_us: 1000, cpu: [2],
+      lease: { resource: BrakeActuator, class: FENCED, duration_ms: 30, renew_ms: 10,
+               self_yield_ms: 20, preauthorized_successor: NodeB } }

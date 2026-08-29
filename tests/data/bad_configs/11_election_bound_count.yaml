@@ -1,0 +1,1 @@
+raft: { election_timeout_ms: [150], heartbeat_ms: 50 }

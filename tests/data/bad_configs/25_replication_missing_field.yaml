@@ -1,0 +1,3 @@
+services:
+  - { name: BrakeControl, isolation: PARTITION, criticality: SAFETY_CRITICAL, period_us: 1000,
+      cpu: [2], replication: { mode: ACTIVE_STANDBY, sync_period_us: 5000 } }

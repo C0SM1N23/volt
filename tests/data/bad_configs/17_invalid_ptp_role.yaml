@@ -1,0 +1,1 @@
+ptp: { role: CLIENT, sync_interval_ms: 125, max_offset_us: 100 }

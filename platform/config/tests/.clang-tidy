@@ -1,0 +1,9 @@
+# Test assertions expand into branches that are not present in the source. The
+# project records these test-only deviations in docs/DEVIATIONS.md.
+InheritParentConfig: true
+Checks: >
+  -readability-magic-numbers,
+  -cert-msc32-c,
+  -cert-msc51-cpp,
+  -readability-function-size,
+  -readability-function-cognitive-complexity

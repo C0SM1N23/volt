@@ -1,0 +1,5 @@
+peers: [NodeB, NodeB]
+raft: { election_timeout_ms: [150, 300], heartbeat_ms: 50 }
+swim: { period_ms: 3, timeout_ms: 2, indirect_k: 2, indirect_ms: 3, suspect_ms: 5 }
+can_heartbeat: { id: 0x400, period_ms: 5, miss_threshold: 3 }
+ptp: { role: AUTO, sync_interval_ms: 125, max_offset_us: 100 }

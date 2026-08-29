@@ -39,6 +39,7 @@ add_subdirectory(platform/core)
 add_subdirectory(platform/pal)
 add_subdirectory(platform/log)
 add_subdirectory(platform/trace)
+add_subdirectory(platform/config)
 
 if(VOLT_BUILD_TOOLS)
     add_subdirectory(tools)

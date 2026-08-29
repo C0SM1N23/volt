@@ -1,0 +1,3 @@
+services:
+  - { name: BrakeControl, isolation: PROCESS, criticality: SAFETY_CRITICAL, period_us: 1000,
+      cpu: [2], sched: { policy: SCHED_FIFO, priority: 90 } }

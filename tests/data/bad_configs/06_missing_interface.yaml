@@ -1,0 +1,4 @@
+node:
+  id: NodeA
+  role: [COMPUTE]
+  interfaces: { can: can0, eth: eth0 }

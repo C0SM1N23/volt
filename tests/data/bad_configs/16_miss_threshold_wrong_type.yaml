@@ -1,0 +1,1 @@
+can_heartbeat: { id: 0x400, period_ms: 5, miss_threshold: three }

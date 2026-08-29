@@ -1,0 +1,5 @@
+node:
+  id: NodeA
+  role: [COMPUTE]
+  interfaces: { can: can0, eth: eth0, diag_eth: eth1 }
+  rt: { isolated_cpus: [1024], mlockall: true, sched_reset_on_fork: true }
