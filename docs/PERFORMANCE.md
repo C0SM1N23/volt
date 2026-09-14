@@ -254,3 +254,72 @@ ctest --preset dev -R memory_no_alloc_soak
   si va folosi acelasi contor.
 - Cifra e masurata pe masina de dezvoltare, nu pe tinta PREEMPT_RT din SPEC 25.
   Numarul de alocari nu depinde insa de masina: e o proprietate a codului.
+
+---
+
+## K3 — Latenta IPC intra-nod, toate mecanismele din SPEC §10.1
+
+**Tinta:** shm one-way P50 < 2 µs si P99 < 8 µs (K3), masurate prin ping-pong.
+
+**Ce se masoara:** acelasi payload de 64 de octeti trece dus-intors intre doua
+fire; o latenta one-way este jumatate dintr-un dus-intors. Percentilele vin din
+esantioane per-iteratie, cu 2.000 de iteratii de incalzire aruncate. Throughput:
+pentru transporturile cu coada (shm ring), 1.000.000 de mesaje intr-o singura
+directie cu drenaj concurent, contorizate la destinatie cu conservare verificata
+(`primite + pierdute == produse`); pentru seqlock, rata sustinuta de `store`;
+pentru socketuri si mq, inversul latentei dus-intors — costul pe mesaj domina
+complet rata sustenabila a unui request/response strict alternant.
+
+**Cum:** `platform/ipc/tests/ipc_benchmark_test.cpp` — 100.000 de runde pentru
+mecanismele shm, 20.000 pentru cele cu syscall. Coada de mesaje POSIX intra prin
+PAL (`IMessageQueue`), adaugata exact pentru rolul pe care SPEC §10.1 i-l da:
+termen de comparatie si fallback; regula 2.15 interzice apeluri POSIX in afara
+`platform/pal/`, deci benchmark-ul nu avea alt drum legal catre `mq_*`.
+
+| Mecanism | P50 | P99 | P99.9 | max | Throughput |
+|---|---|---|---|---|---|
+| shm SPSC ring (loan/publish) | **1,02 µs** | **2,37 µs** | 4,11 µs | 31,1 µs | 1,95 M msg/s |
+| shm seqlock (ultima valoare) | **0,38 µs** | 0,66 µs | 1,14 µs | 12,3 µs | 15,2 M store/s |
+| Unix domain socket | 3,90 µs | 8,05 µs | 11,5 µs | 28,2 µs | ~0,13 M msg/s |
+| POSIX mq | 3,52 µs | 6,57 µs | 10,9 µs | 29,2 µs | ~0,14 M msg/s |
+| TCP loopback | 6,61 µs | 14,2 µs | 31,3 µs | 75,7 µs | ~0,08 M msg/s |
+| UDP loopback | 5,87 µs | 11,9 µs | 21,8 µs | 44,2 µs | ~0,09 M msg/s |
+
+K3 cere P50 < 2 µs si P99 < 8 µs pe mediul reglat; ring-ul le tine deja pe un
+build neoptimizat fara isolcpus, cu marja. Ierarhia dintre mecanisme este cea
+asteptata din SPEC §10.1; mq iese putin inaintea UDS pe kernelul asta, diferenta
+e in zgomotul dintre doua syscall-uri.
+
+**Mediu:** AMD Ryzen 7 7435HS, 16 fire logice, Ubuntu 26.04, GCC 14.3, build
+`dev` (`-O0 -g`), kernel generic, fara izolare de CPU. Tabelul de referinta din
+SPEC §10.1 presupune PREEMPT_RT + isolcpus; cifrele de aici sunt limite
+superioare pe o masina de dezvoltare, remasurabile cu acelasi test pe mediul
+reglat la P19.
+
+**Observatii oneste:**
+- Fiecare esantion include doua citiri de ceas prin vDSO (~40-60 ns pe masina
+  asta); la nivelul shm citirea de ceas e o fractiune vizibila din numar, deci
+  cifrele shm sunt supraevaluate cu zeci de nanosecunde, nu subevaluate.
+- Ping-pong-ul strict alternant tine ringurile la adancime 1, deci masoara
+  calea, nu presiunea pe coada; testul de conservare de la T-sarcina acopera
+  restul.
+- Cifrele socket depind de ce face kernelul cu wakeup-urile intre fire; pe un
+  runner incarcat cozile P99.9 si max cresc cu un ordin de marime fara ca vreo
+  linie de cod VOLT sa se schimbe.
+
+**Ce mai spune throughput-ul:** rata shm ring de ~2 M msg/s include, per mesaj,
+imprumut + refcount + fanout + conservare contorizata, pe `-O0`; seqlock-ul, care
+nu tine evidenta nimanui, arata plafonul structurii pure. Diferenta este pretul
+contabilitatii care face crash-recovery-ul posibil, platit o data pe mesaj.
+
+Histograma log2 a distributiei one-way pentru shm ring (generata de acelasi
+test, valorile sunt numar de esantioane):
+
+```
+      512 ns | ####################################   57114
+     1024 ns | ##########################             41129
+     2048 ns | ##                                      1656
+     4096 ns | #                                         85
+     8192 ns | #                                          12
+    16384 ns | #                                           4
+```

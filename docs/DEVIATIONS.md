@@ -206,3 +206,27 @@ e si testat, nu doar presupus.
 de violare, doar aceasta functie. In release aceeasi violare se contorizeaza si
 se emite `TRACE(AllocationViolation)`, fara nicio scriere. Nimic altceva din
 `platform/` nu scrie pe un stream.
+
+---
+
+## DEV-008 — Vederi tipizate peste octetii unui segment partajat
+
+**Regula:** AGENTS.md 2.7 permite `reinterpret_cast` doar in codul de platforma,
+cu justificare; standardul C++ nu defineste formal obiecte create de alt proces
+intr-o mapare partajata.
+
+**Unde:** `platform/ipc/src/topic_state.cpp` (`table_at`),
+`platform/ipc/include/volt/ipc/topic.hpp` (`payload_as`).
+
+**De ce:** un segment partajat este, pentru limbaj, o insiruire de octeti; toate
+procesele scriu si citesc aceleasi forme la aceleasi offseturi, iar fiecare cuvant
+partajat este un atomic lock-free. Cele doua functii sunt singurul loc unde
+sistemul de tipuri afla asta, dupa modelul `sockaddr_conversion` din backend-ul
+POSIX. Tipurile de payload sunt constranse la trivially copyable + standard
+layout (concept `SharablePayload`), deci reprezentarea de octeti este intregul
+adevar despre valoare. Practica e cea consacrata in transporturile zero-copy
+(iceoryx, implementarile DDS); ASan, TSan si UBSan ruleaza intreaga suita fara
+plangeri.
+
+**Riscul ramas:** formal, nu practic - compilatoarele vizate (GCC 14, Clang 19)
+trateaza maparile partajate exact ca pe memorie obisnuita.
