@@ -14,6 +14,7 @@ class PosixClock final : public IClock {
 public:
   [[nodiscard]] core::Timestamp monotonic() const noexcept override;
   [[nodiscard]] core::Timestamp realtime() const noexcept override;
+  [[nodiscard]] core::Timestamp thread_cpu() const noexcept override;
   [[nodiscard]] core::expected<void> sleep_for(core::Duration delay) noexcept override;
 };
 

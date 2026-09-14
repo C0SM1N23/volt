@@ -24,6 +24,7 @@
 #include <sched.h>
 #include <spawn.h>
 #include <string>
+#include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -237,7 +238,12 @@ core::expected<std::unique_ptr<ITimer>> PosixPlatform::create_timer() noexcept {
   if (!descriptor.valid()) {
     return std::unexpected{detail::from_errno(errno)};
   }
-  return std::make_unique<PosixTimer>(std::move(descriptor));
+  // Nonblocking so draining leftovers never waits; the wait itself polls.
+  detail::FileDescriptor cancel{::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK)};
+  if (!cancel.valid()) {
+    return std::unexpected{detail::from_errno(errno)};
+  }
+  return std::make_unique<PosixTimer>(std::move(descriptor), std::move(cancel));
 }
 
 core::expected<std::unique_ptr<ISharedMemory>>

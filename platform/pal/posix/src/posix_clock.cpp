@@ -25,6 +25,10 @@ core::Timestamp PosixClock::monotonic() const noexcept { return read_clock(CLOCK
 
 core::Timestamp PosixClock::realtime() const noexcept { return read_clock(CLOCK_REALTIME); }
 
+core::Timestamp PosixClock::thread_cpu() const noexcept {
+  return read_clock(CLOCK_THREAD_CPUTIME_ID);
+}
+
 core::expected<void> PosixClock::sleep_for(core::Duration delay) noexcept {
   if (delay.ns() < 0) {
     return std::unexpected{core::ErrorCode::kConfigValueOutOfRange};

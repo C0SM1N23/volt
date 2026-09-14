@@ -41,6 +41,9 @@ public:
   /// Stops the timer. Arming again restarts it.
   ///
   /// @post   a subsequent `wait()` blocks until the timer is armed again
+  /// Stops the timer. A wait blocked on it, now or later, reports an error
+  /// rather than sleeping on: this is how a supervisor on another thread
+  /// stops a periodic loop without joining a thread that will never wake.
   [[nodiscard]] virtual core::expected<void> disarm() noexcept = 0;
 
   /// Blocks until the timer has fired at least once.

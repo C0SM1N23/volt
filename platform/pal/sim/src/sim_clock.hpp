@@ -32,10 +32,24 @@ public:
       return std::unexpected{core::ErrorCode::kConfigValueOutOfRange};
     }
     world_->advance_by(delay.ns());
+    // A sleeping thread does not execute; without this ledger the virtual
+    // CPU clock below would bill every nap as work.
+    slept_by_this_thread_ns += delay.ns();
     return {};
   }
 
+  [[nodiscard]] core::Timestamp thread_cpu() const noexcept override {
+    // In a cooperative world a thread "executes" whenever time moves on its
+    // watch, except while it sleeps. Deterministic, and it preserves the one
+    // property callers rely on: waiting is free, working is not.
+    return core::Timestamp::from_ns_since_epoch(world_->now_ns() - slept_by_this_thread_ns);
+  }
+
 private:
+  /// One ledger per host thread: several cooperative sim threads may share
+  /// this clock, and one thread's nap must not discount another's work.
+  static thread_local inline std::int64_t slept_by_this_thread_ns;
+
   detail::SimWorld *world_;
 };
 

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -127,6 +128,40 @@ TYPED_TEST_P(PalConformance, SleepAcceptsAZeroDelay) {
 }
 
 // --------------------------------------------------------------- thread ----
+
+TYPED_TEST_P(PalConformance, ThreadCpuTimeAdvancesWithWork) {
+  IClock &clock = this->platform().clock();
+  const std::int64_t before = clock.thread_cpu().ns_since_epoch();
+  // Enough iterations that even a coarse CPU clock ticks; the loop's result
+  // is observed so the work cannot be optimised away.
+  volatile std::uint64_t sink = 0;
+  for (std::uint64_t iteration = 0; iteration < 2'000'000; ++iteration) {
+    sink = sink + iteration;
+  }
+  const std::int64_t after = clock.thread_cpu().ns_since_epoch();
+  EXPECT_GE(after, before);
+  if (after == before) {
+    // A virtual backend only moves time through waiting; burning host CPU
+    // must not advance it, so equality is the correct answer there.
+    const core::expected<void> waited = clock.sleep_for(kShortInterval);
+    ASSERT_TRUE(waited.has_value());
+    EXPECT_GE(clock.thread_cpu().ns_since_epoch(), before);
+  }
+}
+
+TYPED_TEST_P(PalConformance, SleepingCostsNoMeaningfulThreadCpu) {
+  IClock &clock = this->platform().clock();
+  const std::int64_t wall_before = clock.monotonic().ns_since_epoch();
+  const std::int64_t cpu_before = clock.thread_cpu().ns_since_epoch();
+  ASSERT_TRUE(clock.sleep_for(core::Duration::from_ms(50)).has_value());
+  const std::int64_t wall_delta = clock.monotonic().ns_since_epoch() - wall_before;
+  const std::int64_t cpu_delta = clock.thread_cpu().ns_since_epoch() - cpu_before;
+
+  ASSERT_GE(wall_delta, core::Duration::from_ms(50).ns());
+  // Waiting is free, working is not: the nap may cost bookkeeping, never
+  // anything on the order of the nap itself.
+  EXPECT_LT(cpu_delta, wall_delta / 2);
+}
 
 TYPED_TEST_P(PalConformance, ThreadRunsItsEntryPoint) {
   int ran = 0;
@@ -328,6 +363,35 @@ TYPED_TEST_P(PalConformance, DisarmingATimerMakesWaitingReportAnError) {
 }
 
 // -------------------------------------------------------- shared memory ----
+
+TYPED_TEST_P(PalConformance, DisarmingReachesABlockedWait) {
+  core::expected<std::unique_ptr<ITimer>> timer = this->platform().create_timer();
+  ASSERT_TRUE(timer.has_value());
+  // Far enough away that the wait below is a real block, not a race with
+  // the expiration.
+  ASSERT_TRUE((*timer)->arm_once(core::Duration::from_s(30)).has_value());
+
+  std::atomic<bool> wait_failed{false};
+  core::expected<std::unique_ptr<IThread>> waiter = this->platform().create_thread(
+      ThreadConfig{.name = "volt-wait",
+                   .policy = SchedulingPolicy::kOther,
+                   .priority = core::Priority{0},
+                   .cpu_mask = 0,
+                   .stack_bytes = 0},
+      [&timer, &wait_failed] {
+        wait_failed.store(!(*timer)->wait().has_value(), std::memory_order_release);
+      });
+  ASSERT_TRUE(waiter.has_value());
+
+  // Give a real backend a moment to block; a virtual one runs the body at
+  // join, after the disarm, and must reach the same verdict.
+  ASSERT_TRUE(this->platform().clock().sleep_for(kShortInterval).has_value());
+  ASSERT_TRUE((*timer)->disarm().has_value());
+  ASSERT_TRUE((*waiter)->join().has_value());
+
+  EXPECT_TRUE(wait_failed.load(std::memory_order_acquire))
+      << "a disarmed timer left its waiter sleeping or handed it an expiration";
+}
 
 TYPED_TEST_P(PalConformance, SharedMemoryRejectsAZeroSize) {
   const core::expected<std::unique_ptr<ISharedMemory>> region =
@@ -1129,14 +1193,15 @@ TYPED_TEST_P(PalConformance, PromotingTheCurrentThreadRejectsAPriorityOnTheDefau
 REGISTER_TYPED_TEST_SUITE_P(
     PalConformance, MonotonicClockNeverGoesBackwards, MonotonicClockAdvancesAcrossASleep,
     RealtimeClockIsPastTheEpoch, SleepRejectsANegativeDelay, SleepAcceptsAZeroDelay,
-    ThreadRunsItsEntryPoint, ThreadIsNotJoinableAfterJoining,
-    JoiningATwiceJoinedThreadReportsAnError, ThreadKeepsTheNameItWasGiven,
-    ThreadNameIsTruncatedRatherThanRejected, DefaultPolicyRejectsANonZeroPriority,
-    RealTimePriorityFailsGracefullyWithoutPermission, RealTimePolicyRejectsAPriorityOutOfRange,
-    SeveralThreadsAllRunToCompletion, ThreadAcceptsAnExplicitStackSize,
-    WaitingOnAnUnarmedTimerReportsAnError, OneShotTimerRejectsAZeroDelay,
-    PeriodicTimerRejectsAZeroPeriod, OneShotTimerFires, OneShotTimerDoesNotAdvanceTheClockBackwards,
-    PeriodicTimerFiresRepeatedly, DisarmingATimerMakesWaitingReportAnError,
+    ThreadCpuTimeAdvancesWithWork, SleepingCostsNoMeaningfulThreadCpu, ThreadRunsItsEntryPoint,
+    ThreadIsNotJoinableAfterJoining, JoiningATwiceJoinedThreadReportsAnError,
+    ThreadKeepsTheNameItWasGiven, ThreadNameIsTruncatedRatherThanRejected,
+    DefaultPolicyRejectsANonZeroPriority, RealTimePriorityFailsGracefullyWithoutPermission,
+    RealTimePolicyRejectsAPriorityOutOfRange, SeveralThreadsAllRunToCompletion,
+    ThreadAcceptsAnExplicitStackSize, WaitingOnAnUnarmedTimerReportsAnError,
+    OneShotTimerRejectsAZeroDelay, PeriodicTimerRejectsAZeroPeriod, OneShotTimerFires,
+    OneShotTimerDoesNotAdvanceTheClockBackwards, PeriodicTimerFiresRepeatedly,
+    DisarmingATimerMakesWaitingReportAnError, DisarmingReachesABlockedWait,
     SharedMemoryRejectsAZeroSize, SharedMemoryHasTheRequestedSize, SharedMemoryStartsZeroed,
     SharedMemoryReportsItsName, SharedMemoryIsVisibleThroughASecondMapping,
     OpeningAnUnknownSharedMemoryNameReportsAnError, BindingAssignsAnEphemeralPort,
@@ -1156,15 +1221,15 @@ REGISTER_TYPED_TEST_SUITE_P(
     StreamCarriesBytesFromClientToServer, StreamCarriesBytesFromServerToClient,
     HalfClosingIsReportedAsEndOfStream, HalfClosingLeavesTheOtherDirectionOpen,
     StreamReceiveTimesOutWhenNothingArrives, StreamReceiveTimeoutRejectsAZeroDuration,
-    ADestroyedPeerReadsAsEndOfStream, LocalStreamCarriesBytesBothWays, LocalConnectionIsEstablishedBeforeItIsAccepted,
-    ConnectingToAMissingLocalPathReportsAnError, ListeningTwiceOnALivePathReportsBusy,
-    AClosedListenersPathCanBeListenedOnAgain, LocalPeerCredentialsIdentifyThisProcess,
-    TcpStreamHasNoPeerCredentials, LocalStreamHasNoTcpEndpoints, TheCurrentProcessIsAlive,
-    AReapedChildIsNoLongerAlive, MessageQueueRoundTripsAMessage,
-    MessageQueueReceiveTimesOutWhenEmpty, MessageQueueSendReportsExhaustionWhenFull,
-    MessageQueueRejectsAnOversizedMessage, MessageQueueRejectsAZeroGeometry,
-    OpeningAMissingMessageQueueReportsAnError, OpeningAMissingWatchdogReportsAnError,
-    WatchdogRejectsAZeroTimeout, WatchdogAcceptsBeingPetted,
+    ADestroyedPeerReadsAsEndOfStream, LocalStreamCarriesBytesBothWays,
+    LocalConnectionIsEstablishedBeforeItIsAccepted, ConnectingToAMissingLocalPathReportsAnError,
+    ListeningTwiceOnALivePathReportsBusy, AClosedListenersPathCanBeListenedOnAgain,
+    LocalPeerCredentialsIdentifyThisProcess, TcpStreamHasNoPeerCredentials,
+    LocalStreamHasNoTcpEndpoints, TheCurrentProcessIsAlive, AReapedChildIsNoLongerAlive,
+    MessageQueueRoundTripsAMessage, MessageQueueReceiveTimesOutWhenEmpty,
+    MessageQueueSendReportsExhaustionWhenFull, MessageQueueRejectsAnOversizedMessage,
+    MessageQueueRejectsAZeroGeometry, OpeningAMissingMessageQueueReportsAnError,
+    OpeningAMissingWatchdogReportsAnError, WatchdogRejectsAZeroTimeout, WatchdogAcceptsBeingPetted,
     LockingMemoryEitherSucceedsOrReportsWhyNot, PromotingTheCurrentThreadRejectsABadPriority,
     PromotingTheCurrentThreadRejectsAPriorityOnTheDefaultPolicy);
 

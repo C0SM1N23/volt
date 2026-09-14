@@ -32,6 +32,16 @@ public:
   /// @rt     allocation-free; never use it to measure a duration
   [[nodiscard]] virtual core::Timestamp realtime() const noexcept = 0;
 
+  /// Returns how long the calling thread has actually executed.
+  ///
+  /// Pure CPU time, not wall time: waiting costs nothing here, which is what
+  /// separates "the job is expensive" from "the machine was busy" when a
+  /// budget is checked (SPEC 9.4).
+  ///
+  /// @thread meaningful only for the calling thread
+  /// @rt     one system call at most
+  [[nodiscard]] virtual core::Timestamp thread_cpu() const noexcept = 0;
+
   /// Waits until at least `delay` has passed on the monotonic clock.
   ///
   /// @pre    `delay` is not negative
