@@ -28,6 +28,11 @@ constexpr int kHighestRealTimePriority = 99;
 
 [[nodiscard]] core::expected<void> validate_scheduling(SchedulingPolicy policy,
                                                        core::Priority priority) noexcept {
+  if (policy == SchedulingPolicy::kDeadline) {
+    // A reservation cannot be expressed as a priority; the deadline call is
+    // the way in, exactly as on the POSIX backend.
+    return std::unexpected{core::ErrorCode::kConfigValueOutOfRange};
+  }
   const auto requested = static_cast<int>(priority.value());
   if (policy == SchedulingPolicy::kOther) {
     // The time-sharing policy has one priority; asking for another means the
@@ -198,6 +203,25 @@ SimPlatform::open_watchdog(std::string_view path) noexcept {
 
 core::expected<void> SimPlatform::lock_memory() noexcept {
   world_->record("platform.lock_memory", 0);
+  return {};
+}
+
+core::expected<void>
+SimPlatform::set_current_thread_deadline(const DeadlineParameters &parameters) noexcept {
+  // The same shape the sporadic task model requires, checked identically to
+  // the POSIX backend so a configuration mistake is caught in simulation
+  // rather than only on the target.
+  const bool positive =
+      parameters.runtime.ns() > 0 && parameters.deadline.ns() > 0 && parameters.period.ns() > 0;
+  if (!positive || parameters.runtime.ns() > parameters.deadline.ns() ||
+      parameters.deadline.ns() > parameters.period.ns()) {
+    return std::unexpected{core::ErrorCode::kConfigValueOutOfRange};
+  }
+  // No admission test: a simulated world runs one body at a time to
+  // completion, so there is no bandwidth to compete for. What the simulation
+  // does reproduce is the contract - a well formed reservation is accepted,
+  // a malformed one is refused.
+  world_->record("platform.set_deadline", static_cast<std::uint64_t>(parameters.runtime.ns()));
   return {};
 }
 

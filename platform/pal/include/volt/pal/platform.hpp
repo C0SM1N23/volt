@@ -194,6 +194,23 @@ public:
   ///         kResourceUnavailable when the caller may not set the policy
   [[nodiscard]] virtual core::expected<void>
   set_current_thread_scheduling(SchedulingPolicy policy, core::Priority priority) noexcept = 0;
+
+  /// Places the calling thread under the deadline policy with `parameters`.
+  ///
+  /// The calling thread applies this to itself rather than receiving it at
+  /// creation: the kernel runs an admission test at this moment, against the
+  /// bandwidth still free, so the answer belongs to the thread that has to
+  /// live with it. It also keeps `ThreadConfig` from carrying a field that
+  /// means nothing for the other policies.
+  ///
+  /// @pre    0 < runtime <= deadline <= period
+  /// @post   on success the thread is guaranteed `runtime` every `period`
+  /// @errors kConfigValueOutOfRange when the triple is not ordered that way,
+  ///         kResourceUnavailable when the caller may not set the policy,
+  ///         kResourceBusy when the kernel's admission test refuses the
+  ///         reservation because the bandwidth is already committed
+  [[nodiscard]] virtual core::expected<void>
+  set_current_thread_deadline(const DeadlineParameters &parameters) noexcept = 0;
 };
 
 } // namespace volt::pal

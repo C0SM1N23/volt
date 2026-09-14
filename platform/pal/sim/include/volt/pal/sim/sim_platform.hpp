@@ -92,6 +92,9 @@ public:
   [[nodiscard]] core::expected<void>
   set_current_thread_scheduling(SchedulingPolicy policy, core::Priority priority) noexcept override;
 
+  [[nodiscard]] core::expected<void>
+  set_current_thread_deadline(const DeadlineParameters &parameters) noexcept override;
+
   /// Declares that a program exists at `path` and how it ends.
   ///
   /// A simulated world has no filesystem of executables, so a scenario states

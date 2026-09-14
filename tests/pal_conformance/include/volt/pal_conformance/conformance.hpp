@@ -1187,6 +1187,57 @@ TYPED_TEST_P(PalConformance, LockingMemoryEitherSucceedsOrReportsWhyNot) {
   EXPECT_EQ(core::category(result.error()), core::ErrorCategory::kResource);
 }
 
+TYPED_TEST_P(PalConformance, DeadlinePolicyRejectsAnUnorderedReservation) {
+  // The sporadic model is 0 < runtime <= deadline <= period. Each of these
+  // breaks one link of that chain, and none of them may reach the kernel.
+  const std::array<DeadlineParameters, 4> impossible{
+      DeadlineParameters{.runtime = core::Duration::from_us(0),
+                         .deadline = core::Duration::from_ms(1),
+                         .period = core::Duration::from_ms(1)},
+      DeadlineParameters{.runtime = core::Duration::from_ms(2),
+                         .deadline = core::Duration::from_ms(1),
+                         .period = core::Duration::from_ms(1)},
+      DeadlineParameters{.runtime = core::Duration::from_us(100),
+                         .deadline = core::Duration::from_ms(2),
+                         .period = core::Duration::from_ms(1)},
+      DeadlineParameters{.runtime = core::Duration::from_us(100),
+                         .deadline = core::Duration::from_us(200),
+                         .period = core::Duration::from_ms(0)}};
+
+  for (std::size_t index = 0; index < impossible.size(); ++index) {
+    const core::expected<void> refused =
+        this->platform().set_current_thread_deadline(impossible[index]);
+    ASSERT_FALSE(refused.has_value()) << "reservation " << index;
+    EXPECT_EQ(refused.error(), core::ErrorCode::kConfigValueOutOfRange) << "reservation " << index;
+  }
+}
+
+TYPED_TEST_P(PalConformance, DeadlinePolicyEitherAdmitsOrExplainsItself) {
+  // A modest reservation: a tenth of every ten milliseconds. Whether the
+  // kernel grants it depends on privilege and on bandwidth already
+  // committed, so the contract is not "it works" but "it answers, and the
+  // answer is one a caller can act on".
+  const DeadlineParameters modest{.runtime = core::Duration::from_ms(1),
+                                  .deadline = core::Duration::from_ms(10),
+                                  .period = core::Duration::from_ms(10)};
+  const core::expected<void> granted = this->platform().set_current_thread_deadline(modest);
+  if (granted.has_value()) {
+    SUCCEED() << "the reservation was admitted";
+    return;
+  }
+  EXPECT_TRUE(granted.error() == core::ErrorCode::kResourceUnavailable ||
+              granted.error() == core::ErrorCode::kResourceBusy)
+      << "a refused reservation must say whether it was permission or bandwidth";
+}
+
+TYPED_TEST_P(PalConformance, DeadlinePolicyIsNotReachableAsAPriority) {
+  // Two ways in would mean two places to get the reservation wrong.
+  const core::expected<void> refused = this->platform().set_current_thread_scheduling(
+      SchedulingPolicy::kDeadline, core::Priority{0});
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_EQ(refused.error(), core::ErrorCode::kConfigValueOutOfRange);
+}
+
 TYPED_TEST_P(PalConformance, PromotingTheCurrentThreadRejectsABadPriority) {
   constexpr core::Priority kImpossiblePriority{200};
   const core::expected<void> result =
@@ -1244,7 +1295,9 @@ REGISTER_TYPED_TEST_SUITE_P(
     MessageQueueSendReportsExhaustionWhenFull, MessageQueueRejectsAnOversizedMessage,
     MessageQueueRejectsAZeroGeometry, OpeningAMissingMessageQueueReportsAnError,
     OpeningAMissingWatchdogReportsAnError, WatchdogRejectsAZeroTimeout, WatchdogAcceptsBeingPetted,
-    LockingMemoryEitherSucceedsOrReportsWhyNot, PromotingTheCurrentThreadRejectsABadPriority,
+    LockingMemoryEitherSucceedsOrReportsWhyNot, DeadlinePolicyRejectsAnUnorderedReservation,
+    DeadlinePolicyEitherAdmitsOrExplainsItself, DeadlinePolicyIsNotReachableAsAPriority,
+    PromotingTheCurrentThreadRejectsABadPriority,
     PromotingTheCurrentThreadRejectsAPriorityOnTheDefaultPolicy);
 
 } // namespace volt::pal::conformance

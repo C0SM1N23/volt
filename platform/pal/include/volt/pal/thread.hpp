@@ -1,5 +1,6 @@
 #pragma once
 
+#include "volt/core/duration.hpp"
 #include "volt/core/error.hpp"
 #include "volt/core/types.hpp"
 
@@ -18,6 +19,9 @@ enum class SchedulingPolicy : std::uint8_t {
   kFifo,
   /// Real-time with a time slice among equal priorities.
   kRoundRobin,
+  /// Earliest-deadline-first: the thread carries a reservation rather than a
+  /// priority, so `DeadlineParameters` replace `priority` for it.
+  kDeadline,
 };
 
 /// Bit per CPU. Zero means the thread inherits whatever affinity it was given,
@@ -36,6 +40,22 @@ inline constexpr std::size_t kMaxThreadNameLength = 15;
 
 /// What a thread must be told at creation. SPEC 42.2 requires every VOLT
 /// thread to state its name, priority and affinity rather than inherit them.
+/// Reservation a deadline-scheduled thread asks the kernel for.
+///
+/// The triple is the sporadic task model the EDF class of SPEC 9.2 runs on:
+/// the thread is guaranteed `runtime` of CPU in every `period`, and the
+/// kernel expects it to be done `deadline` after each release. Unlike a
+/// fixed priority, this is a contract the kernel admits or refuses, and it
+/// enforces the runtime side by throttling a thread that overruns.
+struct DeadlineParameters {
+  /// CPU budget per period. Must be positive and at most `deadline`.
+  core::Duration runtime;
+  /// Relative deadline. Must be positive and at most `period`.
+  core::Duration deadline;
+  /// Release interval. Must be positive.
+  core::Duration period;
+};
+
 struct ThreadConfig {
   /// Shown by the kernel and every profiler. Truncated by the platform if it
   /// exceeds what the OS accepts.

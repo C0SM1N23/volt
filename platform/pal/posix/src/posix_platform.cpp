@@ -28,6 +28,7 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/timerfd.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -93,6 +94,10 @@ private:
     return SCHED_FIFO;
   case SchedulingPolicy::kRoundRobin:
     return SCHED_RR;
+  case SchedulingPolicy::kDeadline:
+    // A reservation cannot be expressed as a priority, so this path has no
+    // answer for it; `set_current_thread_deadline` is the way in.
+    return std::unexpected{core::ErrorCode::kConfigValueOutOfRange};
   }
   return std::unexpected{core::ErrorCode::kConfigValueOutOfRange};
 }
@@ -170,6 +175,37 @@ void select_cpu(::cpu_set_t &cpus, unsigned cpu, CpuMask mask) noexcept {
     select_cpu(cpus, cpu, mask);
   }
   if (::pthread_attr_setaffinity_np(&attributes, sizeof(cpus), &cpus) != 0) {
+    return std::unexpected{core::ErrorCode::kConfigValueOutOfRange};
+  }
+  return {};
+}
+
+// The kernel's scheduling attributes. glibc ships no wrapper for
+// sched_setattr, so the structure and the syscall number are named here, as
+// the kernel's own documentation instructs. Fields beyond the ones VOLT sets
+// stay zero, which is what tells the kernel to leave them at their defaults.
+struct SchedAttr {
+  std::uint32_t size;
+  std::uint32_t sched_policy;
+  std::uint64_t sched_flags;
+  std::int32_t sched_nice;
+  std::uint32_t sched_priority;
+  std::uint64_t sched_runtime;
+  std::uint64_t sched_deadline;
+  std::uint64_t sched_period;
+};
+
+/// Rejects a reservation the sporadic task model does not allow, before the
+/// kernel is asked. 0 < runtime <= deadline <= period is the model itself:
+/// a budget bigger than the deadline could never be spent in time, and a
+/// deadline past the period would let two releases of the same task be
+/// pending at once.
+[[nodiscard]] core::expected<void>
+validate_deadline(const DeadlineParameters &parameters) noexcept {
+  const bool positive =
+      parameters.runtime.ns() > 0 && parameters.deadline.ns() > 0 && parameters.period.ns() > 0;
+  if (!positive || parameters.runtime.ns() > parameters.deadline.ns() ||
+      parameters.deadline.ns() > parameters.period.ns()) {
     return std::unexpected{core::ErrorCode::kConfigValueOutOfRange};
   }
   return {};
@@ -553,6 +589,33 @@ PosixPlatform::set_current_thread_scheduling(SchedulingPolicy policy,
   // A zero pid means the calling thread on Linux, which is what a thread
   // promoting itself to real-time needs.
   if (::sched_setscheduler(0, *posix_policy, &parameters) != 0) {
+    return std::unexpected{detail::from_errno(errno)};
+  }
+  return {};
+}
+
+core::expected<void>
+PosixPlatform::set_current_thread_deadline(const DeadlineParameters &parameters) noexcept {
+  const core::expected<void> valid = validate_deadline(parameters);
+  if (!valid.has_value()) {
+    return valid;
+  }
+
+  SchedAttr attributes{};
+  attributes.size = sizeof(attributes);
+  attributes.sched_policy = SCHED_DEADLINE;
+  attributes.sched_runtime = static_cast<std::uint64_t>(parameters.runtime.ns());
+  attributes.sched_deadline = static_cast<std::uint64_t>(parameters.deadline.ns());
+  attributes.sched_period = static_cast<std::uint64_t>(parameters.period.ns());
+
+  // Thread id zero means the calling thread.
+  if (::syscall(SYS_sched_setattr, 0, &attributes, 0U) != 0) {
+    // EBUSY is the admission test refusing: the reservation is well formed,
+    // the bandwidth is simply already spoken for. That is a different answer
+    // from "you are not allowed to ask", and a caller may retry smaller.
+    if (errno == EBUSY) {
+      return std::unexpected{core::ErrorCode::kResourceBusy};
+    }
     return std::unexpected{detail::from_errno(errno)};
   }
   return {};
