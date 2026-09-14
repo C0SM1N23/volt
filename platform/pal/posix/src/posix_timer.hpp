@@ -33,7 +33,14 @@ public:
   [[nodiscard]] core::expected<std::uint64_t> wait() noexcept override;
 
 private:
+  enum class Ready : std::uint8_t;
+
   [[nodiscard]] core::expected<void> arm(core::Duration first, core::Duration repeat) noexcept;
+
+  /// Blocks until the timer expires, the cancel channel speaks, or the wait
+  /// has to be retried.
+  [[nodiscard]] Ready poll_once() noexcept;
+
   void drain_cancel() noexcept;
 
   detail::FileDescriptor descriptor_;

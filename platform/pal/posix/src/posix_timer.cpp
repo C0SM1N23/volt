@@ -15,9 +15,11 @@ namespace volt::pal::posix {
 
 void PosixTimer::drain_cancel() noexcept {
   // Nonblocking: either a token is there and one read clears the whole
-  // eventfd counter, or there is nothing to clear.
+  // eventfd counter, or EAGAIN says there was nothing to clear. Both are
+  // the outcomes this wants, so the result is bound and deliberately left
+  // alone - fortified builds refuse to let it be dropped at the call.
   std::uint64_t tokens = 0;
-  static_cast<void>(::read(cancel_.get(), &tokens, sizeof(tokens)));
+  [[maybe_unused]] const ::ssize_t drained = ::read(cancel_.get(), &tokens, sizeof(tokens));
 }
 
 core::expected<void> PosixTimer::arm(core::Duration first, core::Duration repeat) noexcept {
@@ -68,6 +70,26 @@ core::expected<void> PosixTimer::disarm() noexcept {
   return {};
 }
 
+/// What one poll over the timer and its cancel channel concluded.
+enum class PosixTimer::Ready : std::uint8_t { kExpired, kCancelled, kRetry };
+
+PosixTimer::Ready PosixTimer::poll_once() noexcept {
+  std::array<::pollfd, 2> waited{{{.fd = descriptor_.get(), .events = POLLIN, .revents = 0},
+                                  {.fd = cancel_.get(), .events = POLLIN, .revents = 0}}};
+  if (::poll(waited.data(), waited.size(), -1) < 0) {
+    // A signal is not an answer; anything else is reported by the read that
+    // follows, which meets the same condition.
+    return Ready::kRetry;
+  }
+  // The cancel wins a tie: a disarm concurrent with an expiration means the
+  // owner no longer wants activations, so delivering one anyway would hand
+  // the caller work its supervisor just revoked.
+  if ((waited[1].revents & POLLIN) != 0) {
+    return Ready::kCancelled;
+  }
+  return (waited[0].revents & POLLIN) != 0 ? Ready::kExpired : Ready::kRetry;
+}
+
 core::expected<std::uint64_t> PosixTimer::wait() noexcept {
   // Relaxed: an unarmed timer answers immediately; the racy case where a
   // concurrent disarm lands mid-wait is handled by the cancel token below.
@@ -76,22 +98,12 @@ core::expected<std::uint64_t> PosixTimer::wait() noexcept {
   }
 
   while (true) {
-    std::array<::pollfd, 2> waited{{{.fd = descriptor_.get(), .events = POLLIN, .revents = 0},
-                                    {.fd = cancel_.get(), .events = POLLIN, .revents = 0}}};
-    if (::poll(waited.data(), waited.size(), -1) < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      return std::unexpected{detail::from_errno(errno)};
-    }
-    // The cancel wins a tie: a disarm concurrent with an expiration means
-    // the owner no longer wants activations, so delivering one anyway would
-    // hand the caller work its supervisor just revoked.
-    if ((waited[1].revents & POLLIN) != 0) {
+    const Ready ready = poll_once();
+    if (ready == Ready::kCancelled) {
       drain_cancel();
       return std::unexpected{core::ErrorCode::kResourceUnavailable};
     }
-    if ((waited[0].revents & POLLIN) == 0) {
+    if (ready == Ready::kRetry) {
       continue;
     }
 
