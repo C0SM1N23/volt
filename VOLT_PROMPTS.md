@@ -708,6 +708,8 @@ Plus un test care verifica explicit ca setarea prioritatii RT esueaza *elegant* 
 
 ## P12 — Transport zero-copy in memorie partajata
 
+- [x] Done
+
 **Citeste inainte:** SPEC §10.1-10.2, §8.3, §0.2 (K3).
 **Se leaga de:** P08, P11.
 
