@@ -763,6 +763,8 @@ Plus un test care verifica explicit ca setarea prioritatii RT esueaza *elegant* 
 
 ## P14 — Scheduler: clasa time-triggered si EDF
 
+- [x] Done
+
 **Citeste inainte:** SPEC §9.2, §38 (lantul de timp), §8.2.
 **Se leaga de:** P13.
 
