@@ -31,6 +31,18 @@ namespace {
 
 } // namespace
 
+SimStreamSocket::~SimStreamSocket() {
+  detail::StreamConnection *const connection = world_->network().connection(connection_);
+  if (connection == nullptr) {
+    return;
+  }
+  if (side_ == detail::StreamSide::kClient) {
+    connection->client_stopped_sending = true;
+  } else {
+    connection->server_stopped_sending = true;
+  }
+}
+
 core::expected<std::size_t> SimStreamSocket::send(std::span<const std::byte> payload) noexcept {
   detail::StreamConnection *const connection = world_->network().connection(connection_);
   if (connection == nullptr) {

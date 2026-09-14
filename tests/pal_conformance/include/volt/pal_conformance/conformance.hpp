@@ -630,6 +630,29 @@ TYPED_TEST_P(PalConformance, StreamReceiveTimeoutRejectsAZeroDuration) {
 
 // ----------------------------------------------------------------- file ----
 
+TYPED_TEST_P(PalConformance, ADestroyedPeerReadsAsEndOfStream) {
+  core::expected<std::unique_ptr<IStreamListener>> listener = this->platform().listen_stream(
+      Endpoint{.address = kLoopbackAddress, .port = 0}, kDefaultListenBacklog);
+  ASSERT_TRUE(listener.has_value());
+  const core::expected<Endpoint> where = (*listener)->local_endpoint();
+  ASSERT_TRUE(where.has_value());
+
+  core::expected<std::unique_ptr<IStreamSocket>> server = [&] {
+    core::expected<std::unique_ptr<IStreamSocket>> client = this->platform().connect_stream(*where);
+    EXPECT_TRUE(client.has_value());
+    core::expected<std::unique_ptr<IStreamSocket>> accepted = (*listener)->accept();
+    // The client dies here without a word, as processes do.
+    return accepted;
+  }();
+  ASSERT_TRUE(server.has_value());
+
+  ASSERT_TRUE((*server)->set_receive_timeout(kReceiveTimeout).has_value());
+  std::array<std::byte, 8> buffer{};
+  const core::expected<std::size_t> received = (*server)->receive(buffer);
+  ASSERT_TRUE(received.has_value());
+  EXPECT_EQ(*received, 0U) << "a closed peer is end of stream, not an error";
+}
+
 TYPED_TEST_P(PalConformance, LocalStreamCarriesBytesBothWays) {
   const std::string path = TypeParam::writable_path("bytes_both_ways.sock");
   core::expected<std::unique_ptr<IStreamListener>> listener =
@@ -1133,7 +1156,7 @@ REGISTER_TYPED_TEST_SUITE_P(
     StreamCarriesBytesFromClientToServer, StreamCarriesBytesFromServerToClient,
     HalfClosingIsReportedAsEndOfStream, HalfClosingLeavesTheOtherDirectionOpen,
     StreamReceiveTimesOutWhenNothingArrives, StreamReceiveTimeoutRejectsAZeroDuration,
-    LocalStreamCarriesBytesBothWays, LocalConnectionIsEstablishedBeforeItIsAccepted,
+    ADestroyedPeerReadsAsEndOfStream, LocalStreamCarriesBytesBothWays, LocalConnectionIsEstablishedBeforeItIsAccepted,
     ConnectingToAMissingLocalPathReportsAnError, ListeningTwiceOnALivePathReportsBusy,
     AClosedListenersPathCanBeListenedOnAgain, LocalPeerCredentialsIdentifyThisProcess,
     TcpStreamHasNoPeerCredentials, LocalStreamHasNoTcpEndpoints, TheCurrentProcessIsAlive,

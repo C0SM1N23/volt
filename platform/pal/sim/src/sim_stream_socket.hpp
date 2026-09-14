@@ -23,6 +23,10 @@ public:
                   detail::StreamSide side, bool local = false) noexcept
       : world_{&world}, connection_{connection}, side_{side}, local_{local} {}
 
+  /// Destruction closes this end: the peer reads end of stream, exactly as
+  /// it does when a real descriptor is closed.
+  ~SimStreamSocket() override;
+
   [[nodiscard]] core::expected<std::size_t>
   send(std::span<const std::byte> payload) noexcept override;
   [[nodiscard]] core::expected<std::size_t> receive(std::span<std::byte> buffer) noexcept override;
