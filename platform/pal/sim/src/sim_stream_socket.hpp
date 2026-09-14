@@ -20,20 +20,22 @@ class SimStreamSocket final : public IStreamSocket {
 public:
   /// @pre `world` outlives this socket
   SimStreamSocket(detail::SimWorld &world, detail::SimNetwork::ConnectionId connection,
-                  detail::StreamSide side) noexcept
-      : world_{&world}, connection_{connection}, side_{side} {}
+                  detail::StreamSide side, bool local = false) noexcept
+      : world_{&world}, connection_{connection}, side_{side}, local_{local} {}
 
   [[nodiscard]] core::expected<std::size_t>
   send(std::span<const std::byte> payload) noexcept override;
   [[nodiscard]] core::expected<std::size_t> receive(std::span<std::byte> buffer) noexcept override;
   [[nodiscard]] core::expected<void> shutdown_send() noexcept override;
   [[nodiscard]] core::expected<Endpoint> peer_endpoint() const noexcept override;
+  [[nodiscard]] core::expected<PeerCredentials> peer_credentials() const noexcept override;
   [[nodiscard]] core::expected<void> set_receive_timeout(core::Duration timeout) noexcept override;
 
 private:
   detail::SimWorld *world_;
   detail::SimNetwork::ConnectionId connection_;
   detail::StreamSide side_;
+  bool local_;
   std::optional<core::Duration> receive_timeout_;
 };
 

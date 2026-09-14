@@ -5,9 +5,24 @@
 #include "volt/pal/socket.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <span>
 
 namespace volt::pal {
+
+/// Identity of the process on the other end of a local stream connection.
+///
+/// Filled by the operating system, not by the peer, which is what makes it
+/// usable for authorization: a peer can claim any name in a message, but it
+/// cannot forge what the kernel observed at connect time.
+struct PeerCredentials {
+  /// Operating system identifier of the peer process.
+  std::int32_t process_id = 0;
+  /// User the peer runs as.
+  std::uint32_t user_id = 0;
+  /// Primary group the peer runs as.
+  std::uint32_t group_id = 0;
+};
 
 /// One end of a connected byte stream.
 ///
@@ -54,6 +69,15 @@ public:
   ///
   /// @post   later sends on this end fail; receives keep working
   [[nodiscard]] virtual core::expected<void> shutdown_send() noexcept = 0;
+
+  /// Returns the kernel-attested identity of the peer process.
+  ///
+  /// Only a local (same-machine, filesystem-addressed) connection has one:
+  /// TCP carries no authenticated identity, and pretending otherwise would
+  /// invite code to trust a field nobody verified.
+  ///
+  /// @errors kResourceUnavailable when the connection is not local
+  [[nodiscard]] virtual core::expected<PeerCredentials> peer_credentials() const noexcept = 0;
 
   /// Returns the endpoint at the other end of the connection.
   [[nodiscard]] virtual core::expected<Endpoint> peer_endpoint() const noexcept = 0;

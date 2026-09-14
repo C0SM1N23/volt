@@ -11,6 +11,8 @@
 #include <deque>
 #include <map>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace volt::pal::sim::detail {
@@ -107,6 +109,23 @@ public:
   /// Takes the next connection waiting on `listener`.
   [[nodiscard]] std::optional<ConnectionId> take_pending(SocketId listener);
 
+  /// Starts listening at a filesystem `path`.
+  ///
+  /// @errors kResourceBusy when something already listens there
+  [[nodiscard]] core::expected<SocketId> listen_local(std::string_view path, unsigned backlog);
+
+  /// Establishes a connection to whoever listens at `path`.
+  ///
+  /// @errors kTransientPeerUnreachable when nothing listens there,
+  ///         kResourceExhausted when the listener's backlog is full
+  [[nodiscard]] core::expected<ConnectionId> connect_local(std::string_view path);
+
+  /// Reports whether `listener` is addressed by a path rather than a port.
+  [[nodiscard]] bool is_local_listener(SocketId listener) const;
+
+  /// Removes a listener, releasing its port or path for the next one.
+  void close_listener(SocketId listener);
+
   /// Returns a connection, or nothing when the identifier is unknown.
   [[nodiscard]] StreamConnection *connection(ConnectionId identifier);
 
@@ -132,8 +151,14 @@ private:
 
   SimRandom *random_;
   NetworkModel model_;
+  [[nodiscard]] core::expected<ConnectionId> establish(Listener &listener, Endpoint client,
+                                                       Endpoint server);
+
   std::map<SocketId, Socket> sockets_;
   std::map<SocketId, Listener> listeners_;
+  /// Path-addressed listeners, by the id they share with `listeners_`.
+  std::map<SocketId, std::string> local_listener_paths_;
+  std::map<std::string, SocketId, std::less<>> local_paths_;
   std::map<ConnectionId, StreamConnection> connections_;
   SocketId next_socket_ = 1;
   ConnectionId next_connection_ = 1;

@@ -2,6 +2,7 @@
 
 #include "sim_clock.hpp"
 #include "sim_file.hpp"
+#include "sim_message_queue.hpp"
 #include "sim_process.hpp"
 #include "sim_shared_memory.hpp"
 #include "sim_socket.hpp"
@@ -113,6 +114,46 @@ SimPlatform::connect_stream(Endpoint remote) noexcept {
   return std::make_unique<SimStreamSocket>(*world_, *connection, detail::StreamSide::kClient);
 }
 
+core::expected<std::unique_ptr<IStreamListener>>
+SimPlatform::listen_local(std::string_view path, unsigned backlog) noexcept {
+  const core::expected<detail::SimNetwork::SocketId> listener =
+      world_->network().listen_local(path, backlog);
+  if (!listener.has_value()) {
+    return std::unexpected{listener.error()};
+  }
+  world_->record("listener.local", *listener);
+  return std::make_unique<SimStreamListener>(*world_, *listener);
+}
+
+core::expected<std::unique_ptr<IStreamSocket>>
+SimPlatform::connect_local(std::string_view path) noexcept {
+  const core::expected<detail::SimNetwork::ConnectionId> connection =
+      world_->network().connect_local(path);
+  if (!connection.has_value()) {
+    return std::unexpected{connection.error()};
+  }
+  world_->record("stream.connect_local", *connection);
+  return std::make_unique<SimStreamSocket>(*world_, *connection, detail::StreamSide::kClient, true);
+}
+
+core::expected<std::unique_ptr<IMessageQueue>>
+SimPlatform::create_message_queue(const MessageQueueConfig &config) noexcept {
+  if (config.depth == 0 || config.message_bytes == 0) {
+    return std::unexpected{core::ErrorCode::kConfigValueOutOfRange};
+  }
+  static_cast<void>(world_->create_message_queue(config.name, config.depth, config.message_bytes));
+  world_->record("mq.create", config.depth);
+  return std::make_unique<SimMessageQueue>(*world_, std::string{config.name}, true);
+}
+
+core::expected<std::unique_ptr<IMessageQueue>>
+SimPlatform::open_message_queue(std::string_view name) noexcept {
+  if (world_->find_message_queue(name) == nullptr) {
+    return std::unexpected{core::ErrorCode::kResourceUnavailable};
+  }
+  return std::make_unique<SimMessageQueue>(*world_, std::string{name}, false);
+}
+
 core::expected<std::unique_ptr<IFile>> SimPlatform::open_file(std::string_view path,
                                                               FileMode mode) noexcept {
   if (mode == FileMode::kRead) {
@@ -137,6 +178,14 @@ SimPlatform::spawn_process(const ProcessConfig &config) noexcept {
   const std::int32_t identifier = world_->next_process_id();
   world_->record("process.spawn", static_cast<std::uint64_t>(identifier));
   return std::make_unique<SimProcess>(*world_, identifier, *outcome);
+}
+
+std::int32_t SimPlatform::current_process_id() const noexcept {
+  return detail::SimWorld::kSelfProcessId;
+}
+
+bool SimPlatform::process_alive(std::int32_t identifier) const noexcept {
+  return world_->process_alive(identifier);
 }
 
 core::expected<std::unique_ptr<IWatchdogDevice>>

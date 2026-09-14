@@ -18,7 +18,11 @@ class SimProcess final : public IProcess {
 public:
   /// @pre `world` outlives this process
   SimProcess(detail::SimWorld &world, std::int32_t identifier, ProcessExit outcome) noexcept
-      : world_{&world}, identifier_{identifier}, outcome_{outcome} {}
+      : world_{&world}, identifier_{identifier}, outcome_{outcome} {
+    // Existence begins at spawn, so `process_alive` answers about this child
+    // from now until it is reaped, exactly as the kernel would.
+    world_->register_process(identifier_);
+  }
 
   [[nodiscard]] std::int32_t id() const noexcept override { return identifier_; }
   [[nodiscard]] bool running() const noexcept override { return !reaped_; }

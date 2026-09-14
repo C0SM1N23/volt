@@ -2,6 +2,7 @@ volt_add_library(pal_sim
     SOURCES
         src/sim_event_log.cpp
         src/sim_file.cpp
+        src/sim_message_queue.cpp
         src/sim_network.cpp
         src/sim_platform.cpp
         src/sim_process.cpp

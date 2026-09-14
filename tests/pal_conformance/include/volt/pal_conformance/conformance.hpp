@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -51,6 +52,12 @@ protected:
   void SetUp() override { platform_ = Backend::create_platform(); }
 
   [[nodiscard]] IPlatform &platform() noexcept { return *platform_; }
+
+  /// Builds a name that two test processes on one machine cannot share, for
+  /// resources living in a kernel-global namespace.
+  [[nodiscard]] std::string unique_name(std::string_view stem) {
+    return std::string{stem} + "-" + std::to_string(platform().current_process_id());
+  }
 
   /// Binds a datagram socket to an ephemeral loopback port.
   [[nodiscard]] std::unique_ptr<ISocket> bound_socket() {
@@ -623,6 +630,226 @@ TYPED_TEST_P(PalConformance, StreamReceiveTimeoutRejectsAZeroDuration) {
 
 // ----------------------------------------------------------------- file ----
 
+TYPED_TEST_P(PalConformance, LocalStreamCarriesBytesBothWays) {
+  const std::string path = TypeParam::writable_path("bytes_both_ways.sock");
+  core::expected<std::unique_ptr<IStreamListener>> listener =
+      this->platform().listen_local(path, kDefaultListenBacklog);
+  ASSERT_TRUE(listener.has_value());
+
+  core::expected<std::unique_ptr<IStreamSocket>> client = this->platform().connect_local(path);
+  ASSERT_TRUE(client.has_value());
+  core::expected<std::unique_ptr<IStreamSocket>> server = (*listener)->accept();
+  ASSERT_TRUE(server.has_value());
+
+  const std::array<std::byte, 3> ping{std::byte{'p'}, std::byte{'n'}, std::byte{'g'}};
+  ASSERT_TRUE((*client)->send(ping).has_value());
+  std::array<std::byte, 8> heard{};
+  ASSERT_TRUE((*server)->set_receive_timeout(kReceiveTimeout).has_value());
+  const core::expected<std::size_t> at_server = (*server)->receive(heard);
+  ASSERT_TRUE(at_server.has_value());
+  EXPECT_EQ(*at_server, ping.size());
+  EXPECT_TRUE(std::equal(ping.begin(), ping.end(), heard.begin()));
+
+  const std::array<std::byte, 2> pong{std::byte{'o'}, std::byte{'k'}};
+  ASSERT_TRUE((*server)->send(pong).has_value());
+  ASSERT_TRUE((*client)->set_receive_timeout(kReceiveTimeout).has_value());
+  const core::expected<std::size_t> at_client = (*client)->receive(heard);
+  ASSERT_TRUE(at_client.has_value());
+  EXPECT_EQ(*at_client, pong.size());
+  EXPECT_TRUE(std::equal(pong.begin(), pong.end(), heard.begin()));
+}
+
+TYPED_TEST_P(PalConformance, LocalConnectionIsEstablishedBeforeItIsAccepted) {
+  const std::string path = TypeParam::writable_path("established_first.sock");
+  core::expected<std::unique_ptr<IStreamListener>> listener =
+      this->platform().listen_local(path, kDefaultListenBacklog);
+  ASSERT_TRUE(listener.has_value());
+
+  // One thread connects and only then accepts; anything else deadlocks here.
+  core::expected<std::unique_ptr<IStreamSocket>> client = this->platform().connect_local(path);
+  ASSERT_TRUE(client.has_value());
+  EXPECT_TRUE((*listener)->accept().has_value());
+}
+
+TYPED_TEST_P(PalConformance, ConnectingToAMissingLocalPathReportsAnError) {
+  const std::string path = TypeParam::writable_path("nobody_here.sock");
+  const core::expected<std::unique_ptr<IStreamSocket>> client =
+      this->platform().connect_local(path);
+  ASSERT_FALSE(client.has_value());
+  EXPECT_EQ(client.error(), core::ErrorCode::kTransientPeerUnreachable);
+}
+
+TYPED_TEST_P(PalConformance, ListeningTwiceOnALivePathReportsBusy) {
+  const std::string path = TypeParam::writable_path("taken.sock");
+  core::expected<std::unique_ptr<IStreamListener>> first =
+      this->platform().listen_local(path, kDefaultListenBacklog);
+  ASSERT_TRUE(first.has_value());
+
+  const core::expected<std::unique_ptr<IStreamListener>> second =
+      this->platform().listen_local(path, kDefaultListenBacklog);
+  ASSERT_FALSE(second.has_value());
+  EXPECT_EQ(second.error(), core::ErrorCode::kResourceBusy);
+}
+
+TYPED_TEST_P(PalConformance, AClosedListenersPathCanBeListenedOnAgain) {
+  const std::string path = TypeParam::writable_path("reused.sock");
+  core::expected<std::unique_ptr<IStreamListener>> first =
+      this->platform().listen_local(path, kDefaultListenBacklog);
+  ASSERT_TRUE(first.has_value());
+  first->reset();
+
+  EXPECT_TRUE(this->platform().listen_local(path, kDefaultListenBacklog).has_value());
+}
+
+TYPED_TEST_P(PalConformance, LocalPeerCredentialsIdentifyThisProcess) {
+  const std::string path = TypeParam::writable_path("credentials.sock");
+  core::expected<std::unique_ptr<IStreamListener>> listener =
+      this->platform().listen_local(path, kDefaultListenBacklog);
+  ASSERT_TRUE(listener.has_value());
+  core::expected<std::unique_ptr<IStreamSocket>> client = this->platform().connect_local(path);
+  ASSERT_TRUE(client.has_value());
+  core::expected<std::unique_ptr<IStreamSocket>> server = (*listener)->accept();
+  ASSERT_TRUE(server.has_value());
+
+  // Both ends live in this process, so the kernel-attested identity has to
+  // be this process on both, and the two ends have to agree on the user.
+  const core::expected<PeerCredentials> seen_by_server = (*server)->peer_credentials();
+  const core::expected<PeerCredentials> seen_by_client = (*client)->peer_credentials();
+  ASSERT_TRUE(seen_by_server.has_value());
+  ASSERT_TRUE(seen_by_client.has_value());
+  EXPECT_EQ(seen_by_server->process_id, this->platform().current_process_id());
+  EXPECT_EQ(seen_by_client->process_id, this->platform().current_process_id());
+  EXPECT_EQ(seen_by_server->user_id, seen_by_client->user_id);
+  EXPECT_EQ(seen_by_server->group_id, seen_by_client->group_id);
+}
+
+TYPED_TEST_P(PalConformance, TcpStreamHasNoPeerCredentials) {
+  core::expected<std::unique_ptr<IStreamListener>> listener = this->platform().listen_stream(
+      Endpoint{.address = kLoopbackAddress, .port = 0}, kDefaultListenBacklog);
+  ASSERT_TRUE(listener.has_value());
+  const core::expected<Endpoint> where = (*listener)->local_endpoint();
+  ASSERT_TRUE(where.has_value());
+  core::expected<std::unique_ptr<IStreamSocket>> client = this->platform().connect_stream(*where);
+  ASSERT_TRUE(client.has_value());
+
+  const core::expected<PeerCredentials> identity = (*client)->peer_credentials();
+  ASSERT_FALSE(identity.has_value());
+  EXPECT_EQ(identity.error(), core::ErrorCode::kResourceUnavailable);
+}
+
+TYPED_TEST_P(PalConformance, LocalStreamHasNoTcpEndpoints) {
+  const std::string path = TypeParam::writable_path("no_endpoints.sock");
+  core::expected<std::unique_ptr<IStreamListener>> listener =
+      this->platform().listen_local(path, kDefaultListenBacklog);
+  ASSERT_TRUE(listener.has_value());
+  core::expected<std::unique_ptr<IStreamSocket>> client = this->platform().connect_local(path);
+  ASSERT_TRUE(client.has_value());
+
+  // Identity of a local stream is the path and the credentials; an address
+  // would be an invention.
+  EXPECT_FALSE((*listener)->local_endpoint().has_value());
+  EXPECT_FALSE((*client)->peer_endpoint().has_value());
+}
+
+TYPED_TEST_P(PalConformance, TheCurrentProcessIsAlive) {
+  EXPECT_TRUE(this->platform().process_alive(this->platform().current_process_id()));
+}
+
+TYPED_TEST_P(PalConformance, AReapedChildIsNoLongerAlive) {
+  const ProcessConfig config{.executable = TypeParam::succeeding_program(), .arguments = {}};
+  core::expected<std::unique_ptr<IProcess>> child = this->platform().spawn_process(config);
+  ASSERT_TRUE(child.has_value());
+  const std::int32_t identifier = (*child)->id();
+
+  // Existence spans spawn to reap: even after the child exits it remains
+  // observable until someone waits for it, which is the kernel's contract.
+  EXPECT_TRUE(this->platform().process_alive(identifier));
+  ASSERT_TRUE((*child)->wait().has_value());
+  EXPECT_FALSE(this->platform().process_alive(identifier));
+}
+
+TYPED_TEST_P(PalConformance, MessageQueueRoundTripsAMessage) {
+  const std::string name = this->unique_name("mq-round-trip");
+  core::expected<std::unique_ptr<IMessageQueue>> created = this->platform().create_message_queue(
+      MessageQueueConfig{.name = name, .depth = 4, .message_bytes = 64});
+  ASSERT_TRUE(created.has_value());
+  core::expected<std::unique_ptr<IMessageQueue>> opened = this->platform().open_message_queue(name);
+  ASSERT_TRUE(opened.has_value());
+  EXPECT_EQ((*opened)->depth(), 4U);
+  EXPECT_EQ((*opened)->message_bytes(), 64U);
+
+  const std::array<std::byte, 4> sent{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+  ASSERT_TRUE((*created)->send(sent).has_value());
+  std::array<std::byte, 64> heard{};
+  ASSERT_TRUE((*opened)->set_receive_timeout(kReceiveTimeout).has_value());
+  const core::expected<std::size_t> received = (*opened)->receive(heard);
+  ASSERT_TRUE(received.has_value());
+  EXPECT_EQ(*received, sent.size());
+  EXPECT_TRUE(std::equal(sent.begin(), sent.end(), heard.begin()));
+}
+
+TYPED_TEST_P(PalConformance, MessageQueueReceiveTimesOutWhenEmpty) {
+  const std::string name = this->unique_name("mq-timeout");
+  core::expected<std::unique_ptr<IMessageQueue>> queue = this->platform().create_message_queue(
+      MessageQueueConfig{.name = name, .depth = 2, .message_bytes = 16});
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE((*queue)->set_receive_timeout(kReceiveTimeout).has_value());
+
+  std::array<std::byte, 16> buffer{};
+  const core::expected<std::size_t> received = (*queue)->receive(buffer);
+  ASSERT_FALSE(received.has_value());
+  EXPECT_EQ(received.error(), core::ErrorCode::kTransientTimeout);
+}
+
+TYPED_TEST_P(PalConformance, MessageQueueSendReportsExhaustionWhenFull) {
+  const std::string name = this->unique_name("mq-full");
+  core::expected<std::unique_ptr<IMessageQueue>> queue = this->platform().create_message_queue(
+      MessageQueueConfig{.name = name, .depth = 2, .message_bytes = 16});
+  ASSERT_TRUE(queue.has_value());
+
+  const std::array<std::byte, 1> message{std::byte{7}};
+  ASSERT_TRUE((*queue)->send(message).has_value());
+  ASSERT_TRUE((*queue)->send(message).has_value());
+  // The third send meets a full queue; waiting for the consumer is exactly
+  // what the contract rules out.
+  const core::expected<void> third = (*queue)->send(message);
+  ASSERT_FALSE(third.has_value());
+  EXPECT_EQ(third.error(), core::ErrorCode::kResourceExhausted);
+}
+
+TYPED_TEST_P(PalConformance, MessageQueueRejectsAnOversizedMessage) {
+  const std::string name = this->unique_name("mq-oversized");
+  core::expected<std::unique_ptr<IMessageQueue>> queue = this->platform().create_message_queue(
+      MessageQueueConfig{.name = name, .depth = 2, .message_bytes = 8});
+  ASSERT_TRUE(queue.has_value());
+
+  const std::array<std::byte, 9> message{};
+  const core::expected<void> sent = (*queue)->send(message);
+  ASSERT_FALSE(sent.has_value());
+  EXPECT_EQ(sent.error(), core::ErrorCode::kInternalBufferTooSmall);
+}
+
+TYPED_TEST_P(PalConformance, MessageQueueRejectsAZeroGeometry) {
+  const core::expected<std::unique_ptr<IMessageQueue>> no_depth =
+      this->platform().create_message_queue(
+          MessageQueueConfig{.name = "mq-zero-depth", .depth = 0, .message_bytes = 16});
+  ASSERT_FALSE(no_depth.has_value());
+  EXPECT_EQ(no_depth.error(), core::ErrorCode::kConfigValueOutOfRange);
+
+  const core::expected<std::unique_ptr<IMessageQueue>> no_bytes =
+      this->platform().create_message_queue(
+          MessageQueueConfig{.name = "mq-zero-bytes", .depth = 2, .message_bytes = 0});
+  ASSERT_FALSE(no_bytes.has_value());
+  EXPECT_EQ(no_bytes.error(), core::ErrorCode::kConfigValueOutOfRange);
+}
+
+TYPED_TEST_P(PalConformance, OpeningAMissingMessageQueueReportsAnError) {
+  const core::expected<std::unique_ptr<IMessageQueue>> opened =
+      this->platform().open_message_queue(this->unique_name("mq-never-created"));
+  ASSERT_FALSE(opened.has_value());
+  EXPECT_EQ(opened.error(), core::ErrorCode::kResourceUnavailable);
+}
+
 TYPED_TEST_P(PalConformance, FileRoundTripsWhatWasWritten) {
   const std::string path = TypeParam::writable_path("round_trip.bin");
   constexpr std::array<std::byte, 3> kPayload{std::byte{9}, std::byte{8}, std::byte{7}};
@@ -906,7 +1133,15 @@ REGISTER_TYPED_TEST_SUITE_P(
     StreamCarriesBytesFromClientToServer, StreamCarriesBytesFromServerToClient,
     HalfClosingIsReportedAsEndOfStream, HalfClosingLeavesTheOtherDirectionOpen,
     StreamReceiveTimesOutWhenNothingArrives, StreamReceiveTimeoutRejectsAZeroDuration,
-    OpeningAMissingWatchdogReportsAnError, WatchdogRejectsAZeroTimeout, WatchdogAcceptsBeingPetted,
+    LocalStreamCarriesBytesBothWays, LocalConnectionIsEstablishedBeforeItIsAccepted,
+    ConnectingToAMissingLocalPathReportsAnError, ListeningTwiceOnALivePathReportsBusy,
+    AClosedListenersPathCanBeListenedOnAgain, LocalPeerCredentialsIdentifyThisProcess,
+    TcpStreamHasNoPeerCredentials, LocalStreamHasNoTcpEndpoints, TheCurrentProcessIsAlive,
+    AReapedChildIsNoLongerAlive, MessageQueueRoundTripsAMessage,
+    MessageQueueReceiveTimesOutWhenEmpty, MessageQueueSendReportsExhaustionWhenFull,
+    MessageQueueRejectsAnOversizedMessage, MessageQueueRejectsAZeroGeometry,
+    OpeningAMissingMessageQueueReportsAnError, OpeningAMissingWatchdogReportsAnError,
+    WatchdogRejectsAZeroTimeout, WatchdogAcceptsBeingPetted,
     LockingMemoryEitherSucceedsOrReportsWhyNot, PromotingTheCurrentThreadRejectsABadPriority,
     PromotingTheCurrentThreadRejectsAPriorityOnTheDefaultPolicy);
 

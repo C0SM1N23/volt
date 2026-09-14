@@ -26,6 +26,7 @@ core::expected<ProcessExit> SimProcess::wait() noexcept {
     return std::unexpected{core::ErrorCode::kResourceUnavailable};
   }
   reaped_ = true;
+  world_->mark_process_reaped(identifier_);
   world_->record("process.wait", static_cast<std::uint64_t>(outcome_.code));
   return outcome_;
 }

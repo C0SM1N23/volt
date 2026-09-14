@@ -51,7 +51,26 @@ core::expected<void> PosixStreamSocket::shutdown_send() noexcept {
 }
 
 core::expected<Endpoint> PosixStreamSocket::peer_endpoint() const noexcept {
+  // A local peer has a path, not an address; reporting zeroes would let a
+  // caller mistake it for a real endpoint.
+  if (domain_ == StreamDomain::kLocal) {
+    return std::unexpected{core::ErrorCode::kResourceUnavailable};
+  }
   return detail::peer_endpoint_of(descriptor_.get());
+}
+
+core::expected<PeerCredentials> PosixStreamSocket::peer_credentials() const noexcept {
+  if (domain_ != StreamDomain::kLocal) {
+    return std::unexpected{core::ErrorCode::kResourceUnavailable};
+  }
+  ::ucred identity{};
+  ::socklen_t length = sizeof(identity);
+  if (::getsockopt(descriptor_.get(), SOL_SOCKET, SO_PEERCRED, &identity, &length) != 0) {
+    return std::unexpected{detail::from_errno(errno)};
+  }
+  return PeerCredentials{.process_id = static_cast<std::int32_t>(identity.pid),
+                         .user_id = identity.uid,
+                         .group_id = identity.gid};
 }
 
 core::expected<void> PosixStreamSocket::set_receive_timeout(core::Duration timeout) noexcept {

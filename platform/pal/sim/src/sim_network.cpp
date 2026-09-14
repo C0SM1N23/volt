@@ -159,23 +159,64 @@ core::expected<SimNetwork::ConnectionId> SimNetwork::connect(Endpoint remote) {
   if (listener == nullptr) {
     return std::unexpected{core::ErrorCode::kTransientPeerUnreachable};
   }
-  if (listener->pending.size() >= listener->backlog) {
+  return establish(*listener, Endpoint{.address = remote.address, .port = next_free_port()},
+                   remote);
+}
+
+core::expected<SimNetwork::ConnectionId> SimNetwork::establish(Listener &listener, Endpoint client,
+                                                               Endpoint server) {
+  if (listener.pending.size() >= listener.backlog) {
     // A full backlog is the listener failing to keep up, which the caller must
     // see rather than have hidden behind an unbounded queue.
     return std::unexpected{core::ErrorCode::kResourceExhausted};
   }
-
   const ConnectionId identifier = next_connection_;
   next_connection_ += 1;
-  connections_.emplace(identifier, StreamConnection{.client = Endpoint{.address = remote.address,
-                                                                       .port = next_free_port()},
-                                                    .server = remote,
+  connections_.emplace(identifier, StreamConnection{.client = client,
+                                                    .server = server,
                                                     .to_client = {},
                                                     .to_server = {},
                                                     .client_stopped_sending = false,
                                                     .server_stopped_sending = false});
-  listener->pending.push_back(identifier);
+  listener.pending.push_back(identifier);
   return identifier;
+}
+
+core::expected<SimNetwork::SocketId> SimNetwork::listen_local(std::string_view path,
+                                                              unsigned backlog) {
+  if (local_paths_.contains(path)) {
+    return std::unexpected{core::ErrorCode::kResourceBusy};
+  }
+  const SocketId identifier = next_socket_;
+  next_socket_ += 1;
+  listeners_.emplace(identifier, Listener{.local = Endpoint{}, .backlog = backlog, .pending = {}});
+  std::string owned{path};
+  local_listener_paths_.emplace(identifier, owned);
+  local_paths_.emplace(std::move(owned), identifier);
+  return identifier;
+}
+
+core::expected<SimNetwork::ConnectionId> SimNetwork::connect_local(std::string_view path) {
+  const auto entry = local_paths_.find(path);
+  if (entry == local_paths_.end()) {
+    return std::unexpected{core::ErrorCode::kTransientPeerUnreachable};
+  }
+  // Local endpoints carry no address; identity is the path, and the
+  // credential API is how peers learn who is on the other side.
+  return establish(listeners_.at(entry->second), Endpoint{}, Endpoint{});
+}
+
+bool SimNetwork::is_local_listener(SocketId listener) const {
+  return local_listener_paths_.contains(listener);
+}
+
+void SimNetwork::close_listener(SocketId listener) {
+  const auto path = local_listener_paths_.find(listener);
+  if (path != local_listener_paths_.end()) {
+    local_paths_.erase(path->second);
+    local_listener_paths_.erase(path);
+  }
+  listeners_.erase(listener);
 }
 
 std::optional<SimNetwork::ConnectionId> SimNetwork::take_pending(SocketId listener) {

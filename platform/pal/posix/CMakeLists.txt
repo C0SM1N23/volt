@@ -4,6 +4,7 @@ volt_add_library(pal_posix
         src/posix_clock.cpp
         src/posix_error.cpp
         src/posix_file.cpp
+        src/posix_message_queue.cpp
         src/posix_platform.cpp
         src/posix_process.cpp
         src/posix_shared_memory.cpp

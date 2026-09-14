@@ -92,6 +92,10 @@ core::expected<void> SimStreamSocket::shutdown_send() noexcept {
 }
 
 core::expected<Endpoint> SimStreamSocket::peer_endpoint() const noexcept {
+  // A local peer has a path, not an address, matching the POSIX backend.
+  if (local_) {
+    return std::unexpected{core::ErrorCode::kResourceUnavailable};
+  }
   detail::StreamConnection *const connection = world_->network().connection(connection_);
   if (connection == nullptr) {
     return std::unexpected{core::ErrorCode::kResourceUnavailable};
@@ -105,6 +109,17 @@ core::expected<void> SimStreamSocket::set_receive_timeout(core::Duration timeout
   }
   receive_timeout_ = timeout;
   return {};
+}
+
+core::expected<PeerCredentials> SimStreamSocket::peer_credentials() const noexcept {
+  if (!local_) {
+    return std::unexpected{core::ErrorCode::kResourceUnavailable};
+  }
+  // Every simulated endpoint runs inside the one simulated process, so both
+  // ends carry the world's own identity, exactly what the POSIX backend
+  // reports for a loopback connection inside one process.
+  return PeerCredentials{
+      .process_id = detail::SimWorld::kSelfProcessId, .user_id = 0, .group_id = 0};
 }
 
 } // namespace volt::pal::sim

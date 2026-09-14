@@ -6,14 +6,22 @@
 
 #include <cerrno>
 #include <sys/socket.h>
+#include <unistd.h>
 
 namespace volt::pal::posix {
 
+PosixStreamListener::~PosixStreamListener() {
+  if (!owned_path_.empty()) {
+    static_cast<void>(::unlink(owned_path_.c_str()));
+  }
+}
+
 core::expected<std::unique_ptr<IStreamSocket>> PosixStreamListener::accept() noexcept {
+  const StreamDomain domain = owned_path_.empty() ? StreamDomain::kInet : StreamDomain::kLocal;
   while (true) {
     detail::FileDescriptor accepted{::accept4(descriptor_.get(), nullptr, nullptr, SOCK_CLOEXEC)};
     if (accepted.valid()) {
-      return std::make_unique<PosixStreamSocket>(std::move(accepted));
+      return std::make_unique<PosixStreamSocket>(std::move(accepted), domain);
     }
     if (errno == EINTR) {
       continue;
@@ -23,6 +31,11 @@ core::expected<std::unique_ptr<IStreamSocket>> PosixStreamListener::accept() noe
 }
 
 core::expected<Endpoint> PosixStreamListener::local_endpoint() const noexcept {
+  // A local listener is addressed by its path, which the creator already
+  // knows; there is no port to report.
+  if (!owned_path_.empty()) {
+    return std::unexpected{core::ErrorCode::kResourceUnavailable};
+  }
   return detail::local_endpoint_of(descriptor_.get());
 }
 

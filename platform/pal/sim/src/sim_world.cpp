@@ -83,6 +83,22 @@ bool SimWorld::file_system_can_grow(std::size_t additional) const noexcept {
   return used + additional <= file_system_capacity_bytes_;
 }
 
+SimWorld::MessageQueueState &SimWorld::create_message_queue(std::string_view name,
+                                                            std::uint32_t depth,
+                                                            std::uint32_t message_bytes) {
+  // A leftover queue from an earlier creation would keep its old geometry and
+  // unread messages, so creation always starts from empty, as it does on the
+  // POSIX backend.
+  MessageQueueState &state = message_queues_[std::string{name}];
+  state = MessageQueueState{.depth = depth, .message_bytes = message_bytes, .messages = {}};
+  return state;
+}
+
+SimWorld::MessageQueueState *SimWorld::find_message_queue(std::string_view name) {
+  const auto entry = message_queues_.find(name);
+  return entry == message_queues_.end() ? nullptr : &entry->second;
+}
+
 std::int32_t SimWorld::next_process_id() noexcept {
   const std::int32_t identifier = next_process_id_;
   next_process_id_ += 1;

@@ -17,6 +17,10 @@ public:
   SimStreamListener(detail::SimWorld &world, detail::SimNetwork::SocketId listener) noexcept
       : world_{&world}, listener_{listener} {}
 
+  /// Releases the port or path, so the next listener can take it, which is
+  /// also what closing the descriptor does on the POSIX backend.
+  ~SimStreamListener() override;
+
   [[nodiscard]] core::expected<std::unique_ptr<IStreamSocket>> accept() noexcept override;
   [[nodiscard]] core::expected<Endpoint> local_endpoint() const noexcept override;
   [[nodiscard]] core::expected<void> set_accept_timeout(core::Duration timeout) noexcept override;

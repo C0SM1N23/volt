@@ -2,6 +2,7 @@
 
 #include "posix_error.hpp"
 #include "posix_file.hpp"
+#include "posix_message_queue.hpp"
 #include "posix_process.hpp"
 #include "posix_shared_memory.hpp"
 #include "posix_socket.hpp"
@@ -15,8 +16,10 @@
 #include "volt/core/endian.hpp"
 
 #include <cerrno>
+#include <csignal>
 #include <fcntl.h>
 #include <memory>
+#include <mqueue.h>
 #include <pthread.h>
 #include <sched.h>
 #include <spawn.h>
@@ -25,6 +28,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/timerfd.h>
+#include <sys/un.h>
 #include <unistd.h>
 #include <vector>
 
@@ -336,6 +340,110 @@ PosixPlatform::connect_stream(Endpoint remote) noexcept {
   return std::make_unique<PosixStreamSocket>(std::move(descriptor));
 }
 
+core::expected<std::unique_ptr<IStreamListener>>
+PosixPlatform::listen_local(std::string_view path, unsigned backlog) noexcept {
+  core::expected<::sockaddr_un> address = detail::to_local_sockaddr(path);
+  if (!address.has_value()) {
+    return std::unexpected{address.error()};
+  }
+  detail::FileDescriptor descriptor{::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0)};
+  if (!descriptor.valid()) {
+    return std::unexpected{detail::from_errno(errno)};
+  }
+
+  std::string path_text{path};
+  if (::bind(descriptor.get(), detail::as_generic(*address), sizeof(*address)) != 0) {
+    if (errno != EADDRINUSE) {
+      return std::unexpected{detail::from_errno(errno)};
+    }
+    // The socket file can outlive its listener: kill -9 removes the process
+    // but not the path. Probing tells the two cases apart - a connect that
+    // succeeds found a live listener and the path is genuinely busy, one that
+    // fails found a corpse and the name is taken over.
+    detail::FileDescriptor probe{::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0)};
+    if (!probe.valid()) {
+      return std::unexpected{detail::from_errno(errno)};
+    }
+    if (::connect(probe.get(), detail::as_generic(*address), sizeof(*address)) == 0) {
+      return std::unexpected{core::ErrorCode::kResourceBusy};
+    }
+    if (::unlink(path_text.c_str()) != 0) {
+      return std::unexpected{detail::from_errno(errno)};
+    }
+    if (::bind(descriptor.get(), detail::as_generic(*address), sizeof(*address)) != 0) {
+      return std::unexpected{detail::from_errno(errno)};
+    }
+  }
+  if (::listen(descriptor.get(), static_cast<int>(backlog)) != 0) {
+    return std::unexpected{detail::from_errno(errno)};
+  }
+  return std::make_unique<PosixStreamListener>(std::move(descriptor), std::move(path_text));
+}
+
+core::expected<std::unique_ptr<IStreamSocket>>
+PosixPlatform::connect_local(std::string_view path) noexcept {
+  core::expected<::sockaddr_un> address = detail::to_local_sockaddr(path);
+  if (!address.has_value()) {
+    return std::unexpected{address.error()};
+  }
+  detail::FileDescriptor descriptor{::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0)};
+  if (!descriptor.valid()) {
+    return std::unexpected{detail::from_errno(errno)};
+  }
+  while (::connect(descriptor.get(), detail::as_generic(*address), sizeof(*address)) != 0) {
+    if (errno == EINTR) {
+      continue;
+    }
+    // A missing path and a stale one answer the same question the same way:
+    // nothing is listening there.
+    if (errno == ENOENT || errno == ECONNREFUSED) {
+      return std::unexpected{core::ErrorCode::kTransientPeerUnreachable};
+    }
+    return std::unexpected{detail::from_errno(errno)};
+  }
+  return std::make_unique<PosixStreamSocket>(std::move(descriptor), StreamDomain::kLocal);
+}
+
+core::expected<std::unique_ptr<IMessageQueue>>
+PosixPlatform::create_message_queue(const MessageQueueConfig &config) noexcept {
+  if (config.depth == 0 || config.message_bytes == 0) {
+    return std::unexpected{core::ErrorCode::kConfigValueOutOfRange};
+  }
+  const std::string normalised = to_shm_name(config.name);
+  // A leftover queue from a crashed run would keep its old geometry and any
+  // unread messages, so the name is removed before it is created again.
+  static_cast<void>(::mq_unlink(normalised.c_str()));
+
+  ::mq_attr attributes{};
+  attributes.mq_maxmsg = static_cast<long>(config.depth);
+  attributes.mq_msgsize = static_cast<long>(config.message_bytes);
+  const ::mqd_t descriptor = ::mq_open(normalised.c_str(), O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC,
+                                       kCreatedFilePermissions, &attributes);
+  if (descriptor == static_cast<::mqd_t>(-1)) {
+    return std::unexpected{detail::from_errno(errno)};
+  }
+  return std::make_unique<PosixMessageQueue>(descriptor, normalised, config.depth,
+                                             config.message_bytes);
+}
+
+core::expected<std::unique_ptr<IMessageQueue>>
+PosixPlatform::open_message_queue(std::string_view name) noexcept {
+  const std::string normalised = to_shm_name(name);
+  const ::mqd_t descriptor = ::mq_open(normalised.c_str(), O_RDWR | O_CLOEXEC);
+  if (descriptor == static_cast<::mqd_t>(-1)) {
+    return std::unexpected{detail::from_errno(errno)};
+  }
+  ::mq_attr attributes{};
+  if (::mq_getattr(descriptor, &attributes) != 0) {
+    const core::ErrorCode reason = detail::from_errno(errno);
+    static_cast<void>(::mq_close(descriptor));
+    return std::unexpected{reason};
+  }
+  return std::make_unique<PosixMessageQueue>(descriptor, std::string{},
+                                             static_cast<std::uint32_t>(attributes.mq_maxmsg),
+                                             static_cast<std::uint32_t>(attributes.mq_msgsize));
+}
+
 core::expected<std::unique_ptr<IFile>> PosixPlatform::open_file(std::string_view path,
                                                                 FileMode mode) noexcept {
   int flags = O_CLOEXEC;
@@ -386,6 +494,23 @@ PosixPlatform::spawn_process(const ProcessConfig &config) noexcept {
     return std::unexpected{detail::from_errno(result)};
   }
   return std::make_unique<PosixProcess>(identifier);
+}
+
+std::int32_t PosixPlatform::current_process_id() const noexcept {
+  return static_cast<std::int32_t>(::getpid());
+}
+
+bool PosixPlatform::process_alive(std::int32_t identifier) const noexcept {
+  if (identifier <= 0) {
+    return false;
+  }
+  // Signal zero performs every check delivery would, without delivering
+  // anything. EPERM still proves existence: the process is there, it just
+  // belongs to someone else.
+  if (::kill(static_cast<::pid_t>(identifier), 0) == 0) {
+    return true;
+  }
+  return errno == EPERM;
 }
 
 core::expected<std::unique_ptr<IWatchdogDevice>>

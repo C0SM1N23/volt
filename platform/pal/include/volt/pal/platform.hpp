@@ -2,6 +2,7 @@
 
 #include "volt/pal/clock.hpp"
 #include "volt/pal/file.hpp"
+#include "volt/pal/message_queue.hpp"
 #include "volt/pal/process.hpp"
 #include "volt/pal/shared_memory.hpp"
 #include "volt/pal/socket.hpp"
@@ -15,6 +16,7 @@
 #include "volt/core/types.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string_view>
 
@@ -96,6 +98,46 @@ public:
   [[nodiscard]] virtual core::expected<std::unique_ptr<IStreamSocket>>
   connect_stream(Endpoint remote) noexcept = 0;
 
+  /// Starts listening for local stream connections at a filesystem `path`.
+  ///
+  /// Local streams are the control plane inside one machine (SPEC 10.1):
+  /// they carry kernel-attested peer credentials, which TCP cannot.
+  ///
+  /// A path whose previous owner died without unlinking it is taken over;
+  /// a path with a live listener behind it is refused.
+  ///
+  /// @pre    `path` fits the platform's local-address limit
+  /// @errors kConfigValueOutOfRange when the path is too long,
+  ///         kResourceBusy when something already listens there,
+  ///         kResourceExhausted when no descriptor is available
+  [[nodiscard]] virtual core::expected<std::unique_ptr<IStreamListener>>
+  listen_local(std::string_view path, unsigned backlog) noexcept = 0;
+
+  /// Opens a local stream connection to the listener at `path`.
+  ///
+  /// @post   on success the connection is established and carries credentials
+  /// @errors kTransientPeerUnreachable when nothing listens there,
+  ///         kConfigValueOutOfRange when the path is too long,
+  ///         kResourceExhausted when no descriptor is available
+  [[nodiscard]] virtual core::expected<std::unique_ptr<IStreamSocket>>
+  connect_local(std::string_view path) noexcept = 0;
+
+  /// Creates a kernel message queue, replacing any queue of that name.
+  ///
+  /// @pre    `config.depth` and `config.message_bytes` are greater than zero
+  /// @post   the queue is removed when the object dies
+  /// @errors kConfigValueOutOfRange for a zero depth or message size,
+  ///         kResourceExhausted when the system refuses the queue
+  [[nodiscard]] virtual core::expected<std::unique_ptr<IMessageQueue>>
+  create_message_queue(const MessageQueueConfig &config) noexcept = 0;
+
+  /// Opens a message queue another process created.
+  ///
+  /// @post   the queue outlives this handle; only the creator removes it
+  /// @errors kResourceUnavailable when no queue carries that name
+  [[nodiscard]] virtual core::expected<std::unique_ptr<IMessageQueue>>
+  open_message_queue(std::string_view name) noexcept = 0;
+
   /// Opens a file.
   ///
   /// @pre    `path` only has to stay alive for the call
@@ -110,6 +152,22 @@ public:
   ///         kResourceExhausted when the system refuses another process
   [[nodiscard]] virtual core::expected<std::unique_ptr<IProcess>>
   spawn_process(const ProcessConfig &config) noexcept = 0;
+
+  /// Returns the operating system identifier of the calling process.
+  ///
+  /// Shared-memory structures record it as the owner of a claimed resource,
+  /// so that a later opener can ask whether the owner still exists.
+  [[nodiscard]] virtual std::int32_t current_process_id() const noexcept = 0;
+
+  /// Reports whether process `identifier` still exists.
+  ///
+  /// An exited-but-unreaped process still exists here, exactly as the kernel
+  /// sees it. The identifier space is reused by every operating system, so a
+  /// true result is evidence, not proof; VOLT only relies on the false case,
+  /// which is definitive, to reclaim what a dead process left behind.
+  ///
+  /// @rt     one system call at most; recovery paths only
+  [[nodiscard]] virtual bool process_alive(std::int32_t identifier) const noexcept = 0;
 
   /// Opens the hardware watchdog.
   ///

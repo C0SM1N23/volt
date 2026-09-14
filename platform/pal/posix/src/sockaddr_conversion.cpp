@@ -28,6 +28,27 @@ const ::sockaddr *as_generic(const ::sockaddr_in &address) noexcept {
   return reinterpret_cast<::sockaddr *>(&address);
 }
 
+const ::sockaddr *as_generic(const ::sockaddr_un &address) noexcept {
+  return reinterpret_cast<const ::sockaddr *>(&address);
+}
+
+::sockaddr *as_generic(::sockaddr_un &address) noexcept {
+  return reinterpret_cast<::sockaddr *>(&address);
+}
+
+core::expected<::sockaddr_un> to_local_sockaddr(std::string_view path) noexcept {
+  ::sockaddr_un address{};
+  address.sun_family = AF_UNIX;
+  // One byte stays for the terminator the kernel expects.
+  if (path.size() >= sizeof(address.sun_path)) {
+    return std::unexpected{core::ErrorCode::kConfigValueOutOfRange};
+  }
+  for (std::size_t index = 0; index < path.size(); ++index) {
+    address.sun_path[index] = path[index];
+  }
+  return address;
+}
+
 core::expected<void> set_receive_timeout(int descriptor, core::Duration timeout) noexcept {
   if (timeout.ns() <= 0) {
     return std::unexpected{core::ErrorCode::kConfigValueOutOfRange};

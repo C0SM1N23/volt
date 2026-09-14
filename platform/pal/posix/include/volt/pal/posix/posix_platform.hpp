@@ -36,6 +36,18 @@ public:
   [[nodiscard]] core::expected<std::unique_ptr<IStreamSocket>>
   connect_stream(Endpoint remote) noexcept override;
 
+  [[nodiscard]] core::expected<std::unique_ptr<IStreamListener>>
+  listen_local(std::string_view path, unsigned backlog) noexcept override;
+
+  [[nodiscard]] core::expected<std::unique_ptr<IStreamSocket>>
+  connect_local(std::string_view path) noexcept override;
+
+  [[nodiscard]] core::expected<std::unique_ptr<IMessageQueue>>
+  create_message_queue(const MessageQueueConfig &config) noexcept override;
+
+  [[nodiscard]] core::expected<std::unique_ptr<IMessageQueue>>
+  open_message_queue(std::string_view name) noexcept override;
+
   [[nodiscard]] core::expected<std::unique_ptr<IFile>> open_file(std::string_view path,
                                                                  FileMode mode) noexcept override;
 
@@ -44,6 +56,10 @@ public:
 
   [[nodiscard]] core::expected<std::unique_ptr<IWatchdogDevice>>
   open_watchdog(std::string_view path) noexcept override;
+
+  [[nodiscard]] std::int32_t current_process_id() const noexcept override;
+
+  [[nodiscard]] bool process_alive(std::int32_t identifier) const noexcept override;
 
   [[nodiscard]] core::expected<void> lock_memory() noexcept override;
 

@@ -4,6 +4,8 @@
 
 namespace volt::pal::sim {
 
+SimStreamListener::~SimStreamListener() { world_->network().close_listener(listener_); }
+
 core::expected<std::unique_ptr<IStreamSocket>> SimStreamListener::accept() noexcept {
   const std::optional<detail::SimNetwork::ConnectionId> pending =
       world_->network().take_pending(listener_);
@@ -19,10 +21,15 @@ core::expected<std::unique_ptr<IStreamSocket>> SimStreamListener::accept() noexc
   }
 
   world_->record("listener.accept", *pending);
-  return std::make_unique<SimStreamSocket>(*world_, *pending, detail::StreamSide::kServer);
+  return std::make_unique<SimStreamSocket>(*world_, *pending, detail::StreamSide::kServer,
+                                           world_->network().is_local_listener(listener_));
 }
 
 core::expected<Endpoint> SimStreamListener::local_endpoint() const noexcept {
+  // Path-addressed listeners have no port to report, as on the POSIX backend.
+  if (world_->network().is_local_listener(listener_)) {
+    return std::unexpected{core::ErrorCode::kResourceUnavailable};
+  }
   return world_->network().listener_endpoint(listener_);
 }
 

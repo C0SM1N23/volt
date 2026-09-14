@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <optional>
 #include <span>
@@ -107,6 +108,45 @@ public:
   /// Returns the next simulated process identifier.
   [[nodiscard]] std::int32_t next_process_id() noexcept;
 
+  /// The identifier of the process the simulation itself runs as.
+  ///
+  /// Spawned processes start above it, so the self identifier can never
+  /// collide with a child's.
+  static constexpr std::int32_t kSelfProcessId = 1;
+
+  /// Marks `identifier` as existing, the moment a process is spawned.
+  void register_process(std::int32_t identifier) { processes_alive_[identifier] = true; }
+
+  /// Marks `identifier` as reaped, after which it no longer exists.
+  void mark_process_reaped(std::int32_t identifier) { processes_alive_[identifier] = false; }
+
+  /// Reports whether process `identifier` exists, matching the kernel's view: an
+  /// exited child keeps existing until someone waits for it.
+  [[nodiscard]] bool process_alive(std::int32_t identifier) const {
+    if (identifier == kSelfProcessId) {
+      return true;
+    }
+    const auto entry = processes_alive_.find(identifier);
+    return entry != processes_alive_.end() && entry->second;
+  }
+
+  /// One simulated kernel message queue.
+  struct MessageQueueState {
+    std::uint32_t depth = 0;
+    std::uint32_t message_bytes = 0;
+    std::deque<std::vector<std::byte>> messages;
+  };
+
+  /// Creates a queue, replacing any queue of that name.
+  [[nodiscard]] MessageQueueState &create_message_queue(std::string_view name, std::uint32_t depth,
+                                                        std::uint32_t message_bytes);
+
+  /// Returns a queue, or nothing when the name is unknown.
+  [[nodiscard]] MessageQueueState *find_message_queue(std::string_view name);
+
+  /// Removes a queue, when its creator dies.
+  void remove_message_queue(std::string_view name) { message_queues_.erase(std::string{name}); }
+
 private:
   // Declared before network_, which borrows it.
   SimRandom random_;
@@ -126,7 +166,10 @@ private:
   // not about a full disk wants.
   std::uint64_t file_system_capacity_bytes_ = 0;
 
-  std::int32_t next_process_id_ = 1;
+  // Above kSelfProcessId, so children and the simulation itself stay distinct.
+  std::int32_t next_process_id_ = kSelfProcessId + 1;
+  std::map<std::int32_t, bool> processes_alive_;
+  std::map<std::string, MessageQueueState, std::less<>> message_queues_;
 };
 
 } // namespace volt::pal::sim::detail
