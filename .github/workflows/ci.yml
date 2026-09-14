@@ -76,7 +76,10 @@ jobs:
       # clang-tidy reads the compile database, so it must be produced by the
       # same compiler family or it trips over flags clang does not accept.
       - name: Configure
-        run: cmake --preset dev -DCMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}"
+        run: |
+          cmake --preset dev \
+            -DCMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}" \
+            -DVOLT_BUILD_TOOLS=ON
 
       - name: Run clang-tidy
         run: "run-clang-tidy-${LLVM_VERSION} -p build/dev -quiet"
@@ -123,6 +126,7 @@ jobs:
           cmake --preset dev \
             -DCMAKE_CXX_COMPILER="${cxx}" \
             -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
+            -DVOLT_BUILD_TOOLS=ON \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
