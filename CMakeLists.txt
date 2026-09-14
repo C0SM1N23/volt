@@ -43,6 +43,7 @@ add_subdirectory(platform/config)
 add_subdirectory(platform/memory)
 add_subdirectory(platform/actor)
 add_subdirectory(platform/ipc)
+add_subdirectory(platform/sched)
 
 if(VOLT_BUILD_TOOLS)
     add_subdirectory(tools)

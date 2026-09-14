@@ -323,3 +323,50 @@ test, valorile sunt numar de esantioane):
      8192 ns | #                                          12
     16384 ns | #                                           4
 ```
+
+---
+
+## K1/K2 — Jitter de activare si deadline-uri la 1 kHz
+
+**Tinta:** K1 cere jitter de activare P99 < 100 µs pe PREEMPT_RT cu isolcpus;
+K2 cere 0 deadline miss in 3,6 milioane de activari (o ora la 1 kHz).
+
+**Ce se masoara:** un task RM de 1 ms cu un job de ~50 µs de CPU pur, condus de
+un timerfd periodic; jitterul este intarzierea trezirii fata de momentul
+teoretic `origine + k·perioada`, calculat din origine, niciodata din "acum" —
+un somn relativ si-ar aduna propria intarziere in fiecare ciclu.
+
+**Cum:** `platform/sched/tests/sched_benchmark_test.cpp` (5 s), plus doua teste
+de deriva in `sched_drift_test.cpp`: ora intreaga la 1 kHz ruleaza pe backend-ul
+de simulare cu timp virtual — 3.600.000 de activari, exact, ±0, cu axa teoretica
+aterizand pe ora la nanosecunda — iar 10 secunde reale pe timerfd verifica
+acelasi motor contra kernelului, unde doar granita de oprire poate misca
+numaratoarea cu ±1 (expirarile pierdute sunt contorizate de kernel, deci deriva
+cumulativa nu are unde sa se ascunda).
+
+| Metrica (kernel generic, fara privilegii RT) | Valoare |
+|---|---|
+| Jitter activare P50 | 37 µs |
+| Jitter activare P99 | **721 µs** |
+| Jitter activare max | 988 µs |
+| Raspuns P50 / P99 | 94 µs / 786 µs |
+| Executie (CPU pur) P50 / P99 | 55 µs / 61 µs |
+| Deadline miss | 8 / 4.995 activari |
+| Activari virtuale K2 (sim) | **3.600.000 / 3.600.000, 0 miss** |
+
+**Mediu:** AMD Ryzen 7 7435HS, Ubuntu 26.04, GCC 14.3, build `dev`, kernel
+generic, `SCHED_FIFO` refuzat (proces neprivilegiat) — schedulerul a raportat
+`realtime_degraded`, deci cifrele de mai sus sunt SCHED_OTHER pe o masina
+incarcata: exact jumatatea "inainte" a povestii pe care P19 o completeaza cu
+masuratoarea de dupa reglajul RT. P99 de 721 µs pe un scheduler fair-share nu
+contrazice tinta K1: o masoara in absenta oricarei garantii, ca referinta.
+
+**Observatii oneste:**
+- `execution` foloseste `CLOCK_THREAD_CPUTIME_ID`, deci masoara jobul, nu
+  masina: P99 de 61 µs pentru un job de 50 µs arata ca bugetul WCET se compara
+  cu ceva stabil chiar si pe kernelul generic.
+- Cele 8 miss-uri apartin cozii de jitter a lui SCHED_OTHER; testul de politici
+  verifica separat, determinist, ca fiecare miss si overrun e contorizat si ca
+  politica din spec (LOG / DEGRADE / SAFE_STATE) ajunge la handler.
+- Ce se raporteaza drept "WCET" este maxim observat + buget declarat, nu WCET
+  analitic; distinctia e reala si ramane scrisa (SPEC 9.4).
