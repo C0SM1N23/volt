@@ -736,6 +736,8 @@ Plus un test care verifica explicit ca setarea prioritatii RT esueaza *elegant* 
 
 ## P13 — Scheduler: clasa rate-monotonic si monitorizarea deadline-urilor
 
+- [x] Done
+
 **Citeste inainte:** SPEC §9.1, §9.2 (RM), §9.4, §0.2 (K1, K2).
 **Se leaga de:** P03, P06, P11.
 
