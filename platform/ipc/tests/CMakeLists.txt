@@ -50,7 +50,8 @@ volt_add_test(ipc_zero_copy_tests
     LINK volt::ipc volt::pal_posix
 )
 target_compile_options(ipc_zero_copy_tests PRIVATE -fno-builtin-memcpy)
-target_link_options(ipc_zero_copy_tests PRIVATE -Wl,--wrap=memcpy)
+target_link_options(ipc_zero_copy_tests PRIVATE -Wl,--wrap=memcpy
+                                                -Wl,--wrap=__memcpy_chk)
 
 # The K3 campaign: every SPEC 10.1 mechanism, same payload, same method.
 # Real threads and real sockets; skipped under instrumentation because a

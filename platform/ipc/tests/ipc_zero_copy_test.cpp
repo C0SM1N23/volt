@@ -35,6 +35,22 @@ extern "C" {
   memcpy_calls.fetch_add(1, std::memory_order_relaxed);
   return __real_memcpy(destination, source, bytes);
 }
+
+// An optimised build with _FORTIFY_SOURCE emits `__memcpy_chk` instead of
+// `memcpy` wherever it knows the destination size - a different symbol, which
+// a wrap of `memcpy` alone would never see. Both spellings are therefore
+// counted, or the instrument would read zero in exactly the build where the
+// payload path matters most.
+// NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp)
+[[nodiscard]] void *__real___memcpy_chk(void *destination, const void *source, std::size_t bytes,
+                                        std::size_t destination_bytes);
+
+// NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp)
+[[nodiscard]] void *__wrap___memcpy_chk(void *destination, const void *source, std::size_t bytes,
+                                        std::size_t destination_bytes) {
+  memcpy_calls.fetch_add(1, std::memory_order_relaxed);
+  return __real___memcpy_chk(destination, source, bytes, destination_bytes);
+}
 }
 
 namespace volt::ipc {
@@ -53,7 +69,11 @@ TEST(IpcZeroCopyTest, TheCounterItselfCounts) {
   const std::uint64_t before = memcpy_calls.load(std::memory_order_relaxed);
   std::uint64_t source = 0xAB;
   std::uint64_t destination = 0;
-  static_cast<void>(std::memcpy(&destination, &source, sizeof(source)));
+  // The length is read through volatile so it is not a constant: an
+  // optimising build turns a fixed-size copy into a register move, and this
+  // call would then prove nothing about a wrap that never ran.
+  volatile std::size_t length = sizeof(source);
+  static_cast<void>(std::memcpy(&destination, &source, length));
   EXPECT_GT(memcpy_calls.load(std::memory_order_relaxed), before)
       << "the wrap is dead and every zero below would be a lie";
   EXPECT_EQ(destination, 0xABU);
