@@ -2,18 +2,16 @@
 
 #include "volt/core/error.hpp"
 #include "volt/pal/platform.hpp"
-#include "volt/sched/detail/task_loop.hpp"
+#include "volt/sched/detail/periodic_runner.hpp"
 #include "volt/sched/rm_priority.hpp"
 #include "volt/sched/task_monitor.hpp"
 #include "volt/sched/task_spec.hpp"
 
-#include <atomic>
-#include <memory>
+#include <span>
 #include <vector>
 
 namespace volt::sched {
 
-/// How the scheduler places its threads in the real-time priority space.
 /// Default band for the rate-monotonic tasks: the top of the SCHED_FIFO
 /// range stays free for the watchdog and interrupt threads (SPEC 8.1),
 /// which must outrank every task, and the bottom for housekeeping.
@@ -41,32 +39,21 @@ class RateMonotonicScheduler final {
 public:
   /// @pre `platform` outlives this scheduler
   RateMonotonicScheduler(pal::IPlatform &platform, SchedulerConfig config) noexcept
-      : platform_{&platform}, config_{config} {}
-
-  // Task threads hold pointers into this object, so it stays put.
-  RateMonotonicScheduler(const RateMonotonicScheduler &) = delete;
-  RateMonotonicScheduler &operator=(const RateMonotonicScheduler &) = delete;
-  RateMonotonicScheduler(RateMonotonicScheduler &&) = delete;
-  RateMonotonicScheduler &operator=(RateMonotonicScheduler &&) = delete;
-
-  /// Stops whatever still runs.
-  ~RateMonotonicScheduler();
+      : runner_{platform, config.require_realtime}, config_{config} {}
 
   /// Registers a task. Only before start().
   ///
   /// @errors kConfigInvalidValue / kConfigValueOutOfRange from validation,
-  ///         kConfigDuplicateId for a reused id,
-  ///         kResourceBusy once started
+  ///         kConfigDuplicateId for a reused id, kResourceBusy once started
   [[nodiscard]] core::expected<void> add(const TaskSpec &spec, JobFunction job);
 
   /// Called on every budget overrun, from the overrunning task's thread.
   /// Set before start().
-  void set_overrun_handler(OverrunHandler handler) { overrun_ = std::move(handler); }
+  void set_overrun_handler(OverrunHandler handler) {
+    runner_.set_overrun_handler(std::move(handler));
+  }
 
-  /// Assigns priorities and launches one thread per task. Once: the jobs
-  /// move into their loops here, so a stopped scheduler is finished, not
-  /// paused - restarting means rebuilding, which is what a supervisor does
-  /// anyway (SPEC 8.1 restarts processes, not schedulers).
+  /// Assigns priorities and launches one thread per task.
   ///
   /// @post   on success every task is armed and running
   /// @errors kConfigValueOutOfRange when the priority band is too small,
@@ -76,15 +63,17 @@ public:
   [[nodiscard]] core::expected<void> start();
 
   /// Disarms every timer and joins every thread. Idempotent.
-  void stop();
+  void stop() { runner_.stop(); }
 
   /// Reports whether start() had to fall back from the real-time policy.
-  [[nodiscard]] bool realtime_degraded() const noexcept { return realtime_degraded_; }
+  [[nodiscard]] bool realtime_degraded() const noexcept { return runner_.realtime_degraded(); }
 
   /// A task's numbers so far.
   ///
   /// @errors kInternalOutOfRange for an unknown id
-  [[nodiscard]] core::expected<TaskStatsSnapshot> stats(TaskId task) const;
+  [[nodiscard]] core::expected<TaskStatsSnapshot> stats(TaskId task) const {
+    return runner_.stats(task);
+  }
 
   /// The priority table start() computed, for reports and tests.
   [[nodiscard]] std::span<const PriorityAssignment> priorities() const noexcept {
@@ -92,26 +81,9 @@ public:
   }
 
 private:
-  struct Slot {
-    TaskSpec spec;
-    JobFunction job;
-    std::unique_ptr<pal::ITimer> timer;
-    std::unique_ptr<TaskMonitor> monitor;
-    std::unique_ptr<detail::TaskLoop> loop;
-    std::unique_ptr<pal::IThread> thread;
-  };
-
-  [[nodiscard]] core::expected<std::unique_ptr<pal::IThread>> launch(Slot &slot,
-                                                                     core::Priority priority);
-
-  pal::IPlatform *platform_;
+  detail::PeriodicRunner runner_;
   SchedulerConfig config_;
-  OverrunHandler overrun_;
-  std::vector<Slot> slots_;
   std::vector<PriorityAssignment> priorities_;
-  std::atomic<bool> running_{false};
-  bool started_ = false;
-  bool realtime_degraded_ = false;
 };
 
 } // namespace volt::sched

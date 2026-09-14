@@ -370,3 +370,93 @@ contrazice tinta K1: o masoara in absenta oricarei garantii, ca referinta.
   politica din spec (LOG / DEGRADE / SAFE_STATE) ajunge la handler.
 - Ce se raporteaza drept "WCET" este maxim observat + buget declarat, nu WCET
   analitic; distinctia e reala si ramane scrisa (SPEC 9.4).
+
+---
+
+## P14 — RM vs EDF vs TT pe acelasi set de task-uri
+
+**Ce se masoara:** jitterul de activare al aceluiasi task de 2 ms (buget 600 µs,
+lucru real 200 µs de CPU pur), alaturi de un task de 10 ms, rulat succesiv sub
+cele trei clase din SPEC §9.2. Toate trei sunt activate de acelasi timer prin
+PAL si folosesc aceeasi instrumentare, deci diferenta masurata e politica, nu
+trei ceasuri diferite.
+
+**Cum:** `platform/sched/tests/sched_comparison_test.cpp`, 3 secunde per clasa,
+~1.500 de activari fiecare.
+
+| Clasa | Jitter P50 | Jitter P99 | Jitter max | Raspuns P99 | Deadline miss |
+|---|---|---|---|---|---|
+| Rate-monotonic (`SCHED_FIFO`) | 25,6 µs | 557 µs | 1.199 µs | 754 µs | 0 / 1499 |
+| EDF (`SCHED_DEADLINE`) | 22,5 µs | 410 µs | 950 µs | 623 µs | 0 / 1499 |
+| **Time-triggered (tabela)** | 20,5 µs | **238 µs** | **299 µs** | 442 µs | 0 / 1496 |
+
+**Mediu:** AMD Ryzen 7 7435HS, Ubuntu 26.04, GCC 14.3, build `dev`, kernel
+generic, proces neprivilegiat. **Toate trei au raportat `realtime_degraded`:**
+fara `CAP_SYS_NICE` nici `SCHED_FIFO`, nici `SCHED_DEADLINE` nu se pot seta,
+deci ce s-a masurat efectiv e `SCHED_OTHER` in toate cele trei cazuri. Cifrele
+sunt utile ca referinta de plecare si ca dovada ca instrumentarea e comparabila
+intre clase, **nu** ca verdict despre politici. Masuratoarea cu privilegii si
+kernel reglat apartine lui P19.
+
+**Ce spun totusi cifrele:** coada e vizibil mai scurta la TT chiar si fara
+garantii de la kernel — max 299 µs fata de 1.199 µs la RM. Motivul nu e ca
+tabela ar fi „mai rapida", ci ca fiecare banda are un singur dispecer care
+doarme pana la instantul urmator: nu exista competitie pentru a decide cine
+ruleaza, deci nu exista nici varianta in care decizia asta intarzie. Asta e
+exact proprietatea pentru care SPEC §9.2 vrea TT pe calea critica.
+
+**Un rezultat care merita spus explicit:** un slot TT nu e preemptibil. Setul
+din SPEC §3.2 (frana 1 ms / 400 µs plus diagnostic 20 ms / 3,21 ms) **nu are
+solutie pe o singura banda**, oricat de bun ar fi generatorul: un task de 1 ms
+care ia 400 µs lasa goluri de maximum 600 µs, iar un job de 3,21 ms are nevoie
+de banda neintrerupta. Generatorul refuza cinstit in loc sa caute la nesfarsit;
+solutia e a doua banda (un al doilea nucleu rezervat) sau spargerea jobului in
+segmente. RM si EDF nu au problema asta pentru ca sunt preemptive — este
+compromisul concret dintre determinism si densitate de impachetare.
+
+---
+
+## P14 — Alinierea de faza din SPEC §38
+
+**Tinta:** rezultatul lui `SensorFusion` gata cu ~200 µs inainte de activarea
+lui `BrakeControl`, ca lantul sa nu piarda o perioada intreaga asteptand.
+
+**Ce se masoara:** doua lucruri, separat, fiindca sunt afirmatii diferite.
+
+1. **Pe tabela (determinist):** distanta de la sfarsitul ferestrei producatorului
+   pana la urmatoarea activare a consumatorului. Generatorul aseaza fuziunea la
+   **190 µs**, astfel incat fereastra ei sa se termine la 800 µs si frana sa
+   porneasca la 1.000 µs — **exact 200 µs**, nici mai devreme. Nu e noroc: e
+   constrangerea din fisierul de intrare, verificata de checker.
+2. **La rulare:** distanta reala de la momentul in care jobul de fuziune si-a
+   publicat rezultatul pana la activarea de frana care il consuma — min 466 µs,
+   median 793 µs peste 79 de perechi. E mai mare decat 200 µs pentru ca jobul de
+   test termina mult inaintea bugetului sau; diferenta e exact bugetul necheltuit.
+   Ce conteaza e ca nu scade niciodata sub 200 µs (consumatorul nu se ia la
+   intrecere cu producatorul) si ca ramane sub o perioada de consumator, adica
+   mai putin de 1 ms — mila pe care §38 spune ca o castiga alinierea.
+
+**Cum:** `platform/sched/tests/sched_classes_test.cpp`,
+`TimeTriggeredTest.ConsumerActivatesAfterItsProducerFinished`.
+
+---
+
+## P14 — Limitele lui `SCHED_DEADLINE`, pe scurt
+
+Lista completa, cu motivele, sta in `platform/sched/include/volt/sched/edf_scheduler.hpp`.
+Rezumatul care conteaza cand alegi clasa:
+
+- **Are nevoie de `CAP_SYS_NICE`.** Fara el fiecare rezervare e refuzata, iar
+  task-urile ruleaza pe politica implicita — `realtime_degraded()` o spune.
+- **Kernelul face propriul admission control** pe banda ramasa din
+  `sched_rt_runtime_us` (95% implicit). Un set pe care RTA il declara
+  schedulabil poate fi totusi refuzat, fiindca bugetul e impartit cu tot ce mai
+  ruleaza pe masina. Refuzul vine ca `kResourceBusy`, distinct de lipsa de
+  permisiuni (`kResourceUnavailable`), tocmai ca apelantul sa poata cere mai putin.
+- **Afinitatea nu se mai poate schimba** dupa ce firul intra pe `SCHED_DEADLINE`,
+  deci clasa ignora masca din `TaskSpec`; fixarea pe nuclee se face din cgroups.
+- **Nu exista mostenire de prioritate.** Un task deadline blocat pe un mutex nu
+  mosteneste nimic — regula 5.3 (fara mutex pe calea de 1 ms) nu e stilistica aici.
+- **Throttling-ul e tacut** din perspectiva firului: un job care depaseste
+  bugetul pur si simplu nu mai e planificat pana la urmatoarea realimentare.
+  Contabilitatea proprie de buget din `TaskLoop` e cea care il face vizibil.

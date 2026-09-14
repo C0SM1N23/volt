@@ -80,4 +80,18 @@ struct TaskSpec {
 ///         empty name, or a kill policy on a safety-critical task
 [[nodiscard]] core::expected<void> validate_for_rate_monotonic(const TaskSpec &spec) noexcept;
 
+/// Rejects a spec the deadline class could not honour.
+///
+/// Stricter than the fixed-priority check in one place: the kernel's
+/// reservation is the sporadic model, so the budget must fit inside the
+/// deadline and the deadline inside the period. A fixed-priority task may
+/// declare a deadline past its period (SPEC 9.1 allows it); a reservation
+/// may not, because two releases of the same task would then be pending at
+/// once and the kernel has nothing to charge the second one to.
+///
+/// @errors kConfigValueOutOfRange for a non-positive or unordered triple,
+///         kConfigInvalidValue for a class this scheduler does not run, an
+///         empty name, or a kill policy on a safety-critical task
+[[nodiscard]] core::expected<void> validate_for_edf(const TaskSpec &spec) noexcept;
+
 } // namespace volt::sched

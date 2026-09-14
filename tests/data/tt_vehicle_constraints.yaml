@@ -1,0 +1,36 @@
+# The control set of SPEC 3.2 with the budgets of the SPEC 9.3 example, as
+# tt_schedule_gen takes it. Two lanes, because a time-triggered slot is not
+# preemptible and the 3.21 ms diagnostics job needs that much uninterrupted
+# lane, which a 1 ms task never leaves free.
+lane_count: 2
+
+tasks:
+  - id: 1
+    name: brake-control
+    period_us: 1000
+    wcet_us: 400
+  - id: 2
+    name: sensor-fusion
+    period_us: 5000
+    wcet_us: 610
+  - id: 3
+    name: vehicle-dynamics
+    period_us: 10000
+    wcet_us: 1720
+  - id: 4
+    name: diagnostics
+    period_us: 20000
+    wcet_us: 3210
+
+precedences:
+  # SPEC 38: the fused result is ready 200 us before the brake activation
+  # that consumes it, so the chain does not spend a period waiting.
+  - before: 2
+    after: 1
+    min_gap_us: 200
+
+exclusions:
+  # Both walk the same diagnostic buffer, so they may not run together even
+  # though the lanes would allow it.
+  - first: 3
+    second: 4
