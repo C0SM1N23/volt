@@ -420,6 +420,20 @@ TYPED_TEST_P(PalConformance, SharedMemoryStartsZeroed) {
   EXPECT_EQ(std::count(bytes.begin(), bytes.end(), std::byte{0}), kRegionBytes);
 }
 
+TYPED_TEST_P(PalConformance, SharedMemoryIsAlignedForOveralignedObjects) {
+  core::expected<std::unique_ptr<ISharedMemory>> region =
+      this->platform().create_shared_memory("volt-conformance-aligned", 4096);
+  ASSERT_TRUE(region.has_value());
+
+  // A cache line is the alignment shared layouts actually ask for, since
+  // padding two cursors apart is how they avoid false sharing. Anything
+  // less from a backend would make such a layout undefined behaviour on it
+  // while working on the other.
+  constexpr std::uintptr_t kCacheLine = 64;
+  const auto address = reinterpret_cast<std::uintptr_t>((*region)->bytes().data());
+  EXPECT_EQ(address % kCacheLine, 0U) << "a shared region began mid cache line";
+}
+
 TYPED_TEST_P(PalConformance, SharedMemoryReportsItsName) {
   core::expected<std::unique_ptr<ISharedMemory>> region =
       this->platform().create_shared_memory("volt-named-region", 64);
@@ -1203,9 +1217,9 @@ REGISTER_TYPED_TEST_SUITE_P(
     OneShotTimerDoesNotAdvanceTheClockBackwards, PeriodicTimerFiresRepeatedly,
     DisarmingATimerMakesWaitingReportAnError, DisarmingReachesABlockedWait,
     SharedMemoryRejectsAZeroSize, SharedMemoryHasTheRequestedSize, SharedMemoryStartsZeroed,
-    SharedMemoryReportsItsName, SharedMemoryIsVisibleThroughASecondMapping,
-    OpeningAnUnknownSharedMemoryNameReportsAnError, BindingAssignsAnEphemeralPort,
-    LocalEndpointIsUnknownBeforeBinding, BindingTwiceReportsAnError,
+    SharedMemoryReportsItsName, SharedMemoryIsAlignedForOveralignedObjects,
+    SharedMemoryIsVisibleThroughASecondMapping, OpeningAnUnknownSharedMemoryNameReportsAnError,
+    BindingAssignsAnEphemeralPort, LocalEndpointIsUnknownBeforeBinding, BindingTwiceReportsAnError,
     DatagramArrivesAtItsDestination, ReceivedDatagramCarriesTheSenderEndpoint,
     ReceiveTimesOutWhenNothingArrives, ReceiveTimeoutRejectsAZeroDuration,
     DatagramLongerThanTheBufferIsTruncated, FileRoundTripsWhatWasWritten,

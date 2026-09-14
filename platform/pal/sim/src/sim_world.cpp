@@ -1,5 +1,7 @@
 #include "sim_world.hpp"
 
+#include <memory>
+
 #include <string>
 #include <utility>
 
@@ -27,10 +29,17 @@ void SimWorld::advance_by(std::int64_t delta_ns) noexcept {
 }
 
 std::span<std::byte> SimWorld::create_region(std::string_view name, std::size_t bytes) {
-  std::vector<std::byte> &region = regions_[std::string{name}];
-  region.assign(bytes, std::byte{0});
+  MappedRegion &region = regions_[std::string{name}];
+  // The extra alignment worth of bytes is what leaves room to start the
+  // region on an aligned address inside ordinary vector storage.
+  region.storage.assign(bytes + kRegionAlignment, std::byte{0});
+  void *address = region.storage.data();
+  std::size_t space = region.storage.size();
+  address = std::align(kRegionAlignment, bytes, address, space);
+  VOLT_ASSERT(address != nullptr, "an over-allocated region could not be aligned");
+  region.bytes = std::span<std::byte>{static_cast<std::byte *>(address), bytes};
   record("shm.create", static_cast<std::uint64_t>(bytes));
-  return region;
+  return region.bytes;
 }
 
 std::optional<std::span<std::byte>> SimWorld::find_region(std::string_view name) {
@@ -38,7 +47,7 @@ std::optional<std::span<std::byte>> SimWorld::find_region(std::string_view name)
   if (entry == regions_.end()) {
     return std::nullopt;
   }
-  return std::span<std::byte>{entry->second};
+  return entry->second.bytes;
 }
 
 std::vector<std::byte> &SimWorld::truncate_file(std::string_view path) {

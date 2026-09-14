@@ -25,6 +25,11 @@ public:
 
   /// Returns the mapped bytes.
   ///
+  /// The first byte is aligned for any object a caller may place in the
+  /// region, over-aligned ones included: shared layouts pad to cache lines
+  /// as a matter of course, and a backend that only promised the default
+  /// alignment would let such a layout compile and then misbehave.
+  ///
   /// @pre   the returned span is valid only while this object is alive
   /// @rt    allocation-free, no syscall
   [[nodiscard]] virtual std::span<std::byte> bytes() noexcept = 0;

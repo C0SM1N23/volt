@@ -69,9 +69,19 @@ public:
   /// Returns the digest of everything that happened so far.
   [[nodiscard]] std::uint64_t event_digest() const noexcept { return events_.digest(); }
 
+  /// Alignment every simulated region starts on.
+  ///
+  /// A real mapping arrives from the kernel page-aligned, and whatever a
+  /// caller lays out inside it may rely on that - an over-aligned type in a
+  /// shared segment is normal, cache-line padding being the usual reason.
+  /// A plain vector only promises `max_align_t`, so a region backed by one
+  /// would let the simulation accept layouts the real backend rejects.
+  static constexpr std::size_t kRegionAlignment = 4096;
+
   /// Creates a zero-filled region, replacing any region of that name.
   ///
-  /// @post the returned span stays valid until the region is created again
+  /// @post the returned span starts on kRegionAlignment and stays valid
+  ///       until the region is created again
   [[nodiscard]] std::span<std::byte> create_region(std::string_view name, std::size_t bytes);
 
   /// Returns an existing region, or nothing when the name is unknown.
@@ -157,7 +167,14 @@ private:
   std::int64_t now_ns_;
   std::int64_t realtime_offset_ns_;
 
-  std::map<std::string, std::vector<std::byte>, std::less<>> regions_;
+  /// Over-allocated storage plus the aligned view handed out; see
+  /// kRegionAlignment for why the two differ.
+  struct MappedRegion {
+    std::vector<std::byte> storage;
+    std::span<std::byte> bytes;
+  };
+
+  std::map<std::string, MappedRegion, std::less<>> regions_;
   std::map<std::string, std::vector<std::byte>, std::less<>> files_;
   std::map<std::string, ProcessExit, std::less<>> programs_;
   std::string watchdog_path_;
