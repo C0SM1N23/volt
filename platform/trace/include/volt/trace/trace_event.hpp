@@ -35,6 +35,7 @@ enum class TraceEvent : std::uint16_t {
   kFailoverBegin = 11,
   kFailoverEnd = 12,
   kAllocationViolation = 13,
+  kBudgetOverrun = 14,
 };
 
 /// Returns the name a trace viewer shows for `event`.
@@ -66,6 +67,8 @@ enum class TraceEvent : std::uint16_t {
     return "FailoverEnd";
   case TraceEvent::kAllocationViolation:
     return "AllocationViolation";
+  case TraceEvent::kBudgetOverrun:
+    return "BudgetOverrun";
   }
   return "Unknown";
 }
@@ -108,6 +111,7 @@ enum class EventShape : std::uint8_t {
   case TraceEvent::kStateChange:
   case TraceEvent::kFaultRaised:
   case TraceEvent::kAllocationViolation:
+  case TraceEvent::kBudgetOverrun:
     return EventShape::kInstant;
   }
   return EventShape::kInstant;
