@@ -16,7 +16,7 @@ struct TopicLayout;
 
 /// Bumped whenever the segment layout changes shape. A reader from another
 /// build refuses a segment whose version differs instead of misreading it.
-inline constexpr std::uint64_t kSegmentVersion = 1;
+inline constexpr std::uint64_t kSegmentVersion = 2;
 
 /// First bytes of a valid, fully initialised segment ("VOLTIPC" + version
 /// nibble). Published last, so an opener that sees it sees everything.
@@ -43,6 +43,12 @@ inline constexpr std::uint32_t kSlotPublished = 2;
 
 /// Fixed head of the segment. Plain fields never change after creation; the
 /// magic is atomic because it is the publication gate.
+/// How many times a slot is offered back to the free list before the
+/// transport gives up on it. Each attempt fails only because someone else
+/// succeeded, so reaching the end means losing a thousand races in a row
+/// while a thousand other operations completed.
+inline constexpr unsigned kReclaimAttempts = 64;
+
 struct SegmentHeader {
   std::atomic<std::uint64_t> magic;
   std::uint64_t fingerprint;
@@ -52,6 +58,10 @@ struct SegmentHeader {
   std::uint32_t history_depth;
   std::uint32_t max_subscribers;
   std::uint32_t ring_capacity;
+  /// Slots that could not be returned to the pool under contention. Zero on
+  /// any healthy topic; a growing value is capacity quietly draining away,
+  /// which is why it is counted rather than left to be inferred.
+  std::atomic<std::uint64_t> lost_slots;
 };
 
 /// The one producer seat of a topic.
@@ -177,6 +187,9 @@ public:
   /// Free message slots.
   [[nodiscard]] std::uint64_t available_slots() const noexcept;
 
+  /// Slots lost because the pool stayed contended through every attempt.
+  [[nodiscard]] std::uint64_t lost_slots() const noexcept;
+
   /// Payload bytes of slot `index`.
   [[nodiscard]] std::byte *payload_at(std::uint32_t index) noexcept;
   [[nodiscard]] const std::byte *payload_at(std::uint32_t index) const noexcept;
@@ -224,6 +237,9 @@ private:
 
   /// Drops one reference; the last one returns the slot to the pool.
   void drop_reference(std::uint32_t index) noexcept;
+
+  /// Offers a slot back to the free list, retrying while it is contended.
+  void return_to_pool(std::uint32_t index) noexcept;
 
   /// Reclaims the producer seat from `dead`, exactly once across racers.
   void recover_publisher(std::int32_t dead) noexcept;

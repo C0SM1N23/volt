@@ -129,6 +129,10 @@ public:
     return core_->state.subscriber_count();
   }
 
+  /// Slots the pool lost because it stayed contended through every attempt.
+  /// Zero on a healthy topic; anything else is capacity draining away.
+  [[nodiscard]] std::uint64_t lost_slots() const noexcept { return core_->state.lost_slots(); }
+
   /// Sweeps seats owned by dead processes. Claims do this on their own; the
   /// entry point exists for supervision loops that want reclamation without
   /// attaching.

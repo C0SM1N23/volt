@@ -133,7 +133,16 @@ TEST(IpcConcurrencyTest, FreeListNeverHandsOneSlotToTwoThreads) {
               ownership_violations.fetch_add(1, std::memory_order_relaxed);
             }
             claimed[*index].store(0, std::memory_order_release);
-            ASSERT_TRUE(list.release(*index).has_value());
+            // Contention is an answer, not a failure: every lost race means
+            // another worker won one, so the caller retries. Four workers on
+            // a two-core runner reach that path often enough that treating
+            // it as fatal is what would be wrong. Exactly one release per
+            // claimed slot, however many attempts it takes.
+            core::expected<void> released = list.release(*index);
+            while (!released.has_value() && released.error() == core::ErrorCode::kResourceBusy) {
+              released = list.release(*index);
+            }
+            EXPECT_TRUE(released.has_value()) << "a slot could not be returned at all";
           }
         });
     ASSERT_TRUE(thread.has_value());
@@ -143,7 +152,7 @@ TEST(IpcConcurrencyTest, FreeListNeverHandsOneSlotToTwoThreads) {
     ASSERT_TRUE(worker->join().has_value());
   }
   EXPECT_EQ(ownership_violations.load(std::memory_order_relaxed), 0U);
-  EXPECT_EQ(list.available(), kSlots);
+  EXPECT_EQ(list.available(), kSlots) << "a slot never made it back to the pool";
 }
 
 TEST(IpcConcurrencyTest, TopicConservesEveryMessageUnderLoad) {
@@ -219,6 +228,7 @@ TEST(IpcConcurrencyTest, TopicConservesEveryMessageUnderLoad) {
   }
   subscribers.clear();
   EXPECT_EQ(topic->available_slots(), kConfig.slot_count);
+  EXPECT_EQ(topic->lost_slots(), 0U) << "the pool gave up on a slot under contention";
 }
 
 } // namespace

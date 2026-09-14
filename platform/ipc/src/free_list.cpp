@@ -3,10 +3,14 @@
 namespace volt::ipc::detail {
 namespace {
 
-/// Retries before a call reports contention. Two parties collide only inside
-/// a few-instruction window, so even a handful suffices; the constant is
-/// generous because the cost of a retry is one cache miss.
-constexpr unsigned kRetryBound = 128;
+/// Retries before a call reports contention.
+///
+/// Every failed attempt means some other party succeeded, so the structure as
+/// a whole never stalls - only this caller does. The bound exists to keep the
+/// loop finite (AGENTS.md 5.7), not because exhausting it is expected: a
+/// slower machine with more contenders reaches a hundred consecutive losses
+/// often enough to matter, and a thousand essentially never.
+constexpr unsigned kRetryBound = 1024;
 
 constexpr unsigned kTagShiftBits = 32;
 constexpr std::uint64_t kIndexMask = 0xFFFF'FFFFULL;

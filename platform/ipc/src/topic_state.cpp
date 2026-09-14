@@ -210,10 +210,7 @@ void TopicState::cancel_loan_slot(std::uint32_t index) noexcept {
       expected, kSlotFree, std::memory_order_relaxed, std::memory_order_relaxed);
   VOLT_ASSERT(transitioned, "cancelling a loan that was not loaned");
   refcount_[index].store(0U, std::memory_order_relaxed);
-  // A slot that cannot rejoin the pool is a permanent leak; going loudly is
-  // the only honest option, and the bounded-retry failure it would take is
-  // beyond anything two parties can produce.
-  VOLT_ASSERT(free_list().release(index).has_value(), "a cancelled loan could not be pooled");
+  return_to_pool(index);
 }
 
 void TopicState::cancel_loan(const LoanTicket &ticket) noexcept {
@@ -370,6 +367,27 @@ void TopicState::release_sample(std::uint32_t port, const SampleTicket &ticket) 
   }
 }
 
+void TopicState::return_to_pool(std::uint32_t index) noexcept {
+  VOLT_LOOP_BOUND(kReclaimAttempts);
+  for (unsigned attempt = 0; attempt < kReclaimAttempts; ++attempt) {
+    const core::expected<void> released = free_list().release(index);
+    if (released.has_value()) {
+      return;
+    }
+    if (released.error() != core::ErrorCode::kResourceBusy) {
+      // A foreign or already-free index is a defect in this file, not
+      // something another thread can cause by being busy.
+      VOLT_ASSERT(false, "a slot outside this pool was returned to it");
+      return;
+    }
+  }
+  // Losing a buffer costs the topic one slot of capacity, which
+  // `available_slots` makes visible and this counts. Aborting instead would
+  // cost the vehicle the whole function, over a race that resolves itself
+  // everywhere else. Relaxed: a diagnostic that orders nothing.
+  header_->lost_slots.fetch_add(1U, std::memory_order_relaxed);
+}
+
 void TopicState::drop_reference(std::uint32_t index) noexcept {
   // Acquire-release, the shared-ownership classic: the release half orders
   // this referent's reads before the decrement, the acquire half makes the
@@ -384,8 +402,7 @@ void TopicState::drop_reference(std::uint32_t index) noexcept {
       // Relaxed: the free list release publishes the transition.
       expected, kSlotFree, std::memory_order_relaxed, std::memory_order_relaxed);
   VOLT_ASSERT(transitioned, "the last reference found a slot not published");
-  // Same reasoning as in cancel_loan_slot: an unpoolable slot is a leak.
-  VOLT_ASSERT(free_list().release(index).has_value(), "a freed slot could not be pooled");
+  return_to_pool(index);
 }
 
 std::uint64_t TopicState::dropped(std::uint32_t port) const noexcept {
@@ -409,6 +426,11 @@ std::uint32_t TopicState::subscriber_count() const noexcept {
     }
   }
   return count;
+}
+
+std::uint64_t TopicState::lost_slots() const noexcept {
+  // Relaxed: a monotonic diagnostic counter read for reporting.
+  return header_->lost_slots.load(std::memory_order_relaxed);
 }
 
 std::uint64_t TopicState::available_slots() const noexcept {
